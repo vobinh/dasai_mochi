@@ -8,12 +8,12 @@
 #include <time.h>
 #include "flappy_game.h"
 #include "car_game.h"
-#include <ChronosESP32.h>
 #include "FontMaker.h"
 #include "background_image.h"
 #include "hour_hand.h"
 #include "minute_hand.h"
 #include "second_hand.h"
+#include "chronos_manager.h" // *** File quản lý Chronos ***
 
 // =======================================================================================
 // --- CẤU HÌNH ---
@@ -44,7 +44,6 @@ enum ButtonAction { ACTION_NONE, ACTION_SINGLE, ACTION_DOUBLE, ACTION_TRIPLE, AC
 // =======================================================================================
 TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite screenSprite = TFT_eSprite(&tft);
-ChronosESP32 Chronos("Mochi Watch");
 
 TFT_eSprite hourHandSprite = TFT_eSprite(&tft);
 TFT_eSprite minuteHandSprite = TFT_eSprite(&tft);
@@ -59,23 +58,6 @@ void setSpritePixel(int16_t x, int16_t y, uint16_t color) {
   screenSprite.drawPixel(x, y, color);
 }
 MakeFont myfont(&setSpritePixel);
-
-// Biến dữ liệu
-Notification latestNotification;
-Navigation latestNavigation;
-String callerInfo;
-bool hasNewNotification = false;
-bool hasNewNavigation = false;
-bool isConnected = false;
-bool isRinging = false;
-unsigned long notificationDisplayTime = 0;
-uint32_t nav_icon_crc = 0xFFFFFFFF;
-
-// Biến cuộn thông báo
-std::vector<String> wrappedMessageLines;
-int messageScrollLine = 0;
-unsigned long lastMessageScrollTime = 0;
-bool isNotificationScrolling = false;
 
 // Video
 VideoInfo* flashVideoList[] = { 
@@ -121,8 +103,7 @@ bool tempUseSD = false;
 int tempNotificationTimeout = 5;
 
 // Menu
-enum MenuTab { TAB_SETTING,
-               TAB_MODE };
+enum MenuTab { TAB_SETTING, TAB_MODE };
 MenuTab currentTab = TAB_SETTING;
 const int NUM_SETTING_ITEMS = 7;
 const int NUM_MODE_ITEMS = 5; // *** TĂNG LÊN 5 ĐỂ THÊM MỤC "Thoát" ***
@@ -139,94 +120,20 @@ const int MAX_VISIBLE_ITEMS = 6; // Số mục menu tối đa hiển thị cùng
 
 
 // =======================================================================================
-// --- CÁC HÀM XỬ LÝ THỜI GIAN RTC ---
-// =======================================================================================
-
-void syncTimeToRTC() {
-  if (!Chronos.isConnected()) return;
-
-  struct tm timeinfo;
-  timeinfo.tm_year = Chronos.getYear() - 1900;
-  timeinfo.tm_mon = Chronos.getMonth() - 1;
-  timeinfo.tm_mday = Chronos.getDay();
-  timeinfo.tm_hour = Chronos.getHourC();
-  timeinfo.tm_min = Chronos.getMinute();
-  timeinfo.tm_sec = Chronos.getSecond();
-
-  time_t t = mktime(&timeinfo);
-  struct timeval now = { .tv_sec = t };
-  settimeofday(&now, NULL);
-
-  timeIsSynced = true;
-  Serial.println("RTC Synced from Bluetooth.");
-}
-
-void getTimeFromRTC() {
-  if (!timeIsSynced) return;
-
-  struct tm timeinfo;
-  time_t now;
-  time(&now);
-  localtime_r(&now, &timeinfo);
-
-  rtc_hour = timeinfo.tm_hour;
-  rtc_minute = timeinfo.tm_min;
-  rtc_second = timeinfo.tm_sec;
-  rtc_day = timeinfo.tm_mday;
-  rtc_month = timeinfo.tm_mon + 1;
-  rtc_year = timeinfo.tm_year + 1900;
-}
-
-
-// =======================================================================================
 // --- CÁC HÀM CHỨC NĂNG KHÁC ---
 // =======================================================================================
 
-void wrapMessage(String text) {
-  wrappedMessageLines.clear();
-  if (text.length() == 0) return;
-  const int maxWidth = tft.width() - 20;
-  String currentLine = "";
-  int lastSpace = -1;
-  for (int i = 0; i < text.length(); i++) {
-    char c = text.charAt(i);
-    if (c == '\n') {
-      wrappedMessageLines.push_back(currentLine);
-      currentLine = "";
-      lastSpace = -1;
-      continue;
-    }
-    String testLine = currentLine + c;
-    if (myfont.getLength(testLine) <= maxWidth) {
-      currentLine += c;
-      if (c == ' ') lastSpace = currentLine.length() - 1;
-    } else {
-      if (lastSpace != -1) {
-        wrappedMessageLines.push_back(currentLine.substring(0, lastSpace));
-        currentLine = currentLine.substring(lastSpace + 1);
-        lastSpace = -1;
-      } else {
-        wrappedMessageLines.push_back(currentLine);
-        currentLine = "";
-      }
-      currentLine += c;
-    }
-  }
-  if (currentLine.length() > 0) wrappedMessageLines.push_back(currentLine);
-}
-
 void drawAnalogWatchFace() {
-  getTimeFromRTC();
   screenSprite.pushImage(0, 0, 240, 240, backgroundImage);
 
-  if (timeIsSynced) {
+  if (chronos_is_time_synced()) {
     char dateStr[10];
-    sprintf(dateStr, "%02d/%02d", rtc_day, rtc_month);
+    sprintf(dateStr, "%02d/%02d", chronos_get_day(), chronos_get_month());
     myfont.print(30, tft.height() / 2 - 10, dateStr, TFT_WHITE, TFT_BLACK);
 
-    float sec_angle = rtc_second * 6;
-    float min_angle = rtc_minute * 6 + rtc_second * 0.1;
-    float hour_angle = (rtc_hour % 12) * 30 + rtc_minute * 0.5;
+    float sec_angle = chronos_get_second() * 6;
+    float min_angle = chronos_get_minute() * 6 + chronos_get_second() * 0.1;
+    float hour_angle = (chronos_get_hour() % 12) * 30 + chronos_get_minute() * 0.5;
 
     hourHandSprite.pushRotated(&screenSprite, hour_angle, TFT_BLACK);
     minuteHandSprite.pushRotated(&screenSprite, min_angle, TFT_BLACK);
@@ -252,46 +159,6 @@ void drawAnalogWatchFace() {
   }
 
   screenSprite.pushSprite(0, 0);
-}
-
-void connectionCallback(bool state) {
-  isConnected = state;
-  if (state) {
-    syncTimeToRTC();
-  }
-}
-
-void notificationCallback(Notification notification) {
-  latestNotification = notification;
-  hasNewNotification = true;
-  wrapMessage(latestNotification.message);
-}
-
-void ringerCallback(String caller, bool state) {
-  callerInfo = caller;
-  isRinging = state;
-}
-
-void configCallback(Config config, uint32_t a, uint32_t b) {
-  if (config == CF_NAV_DATA) {
-    if (a) {
-      latestNavigation = Chronos.getNavigation();
-      hasNewNavigation = true;
-      hasNewNotification = false;
-    } else {
-      hasNewNavigation = false;
-    }
-  }
-  if (config == CF_NAV_ICON) {
-    if (a == 2) {
-      Navigation tempNav = Chronos.getNavigation();
-      if (nav_icon_crc != tempNav.iconCRC) {
-        nav_icon_crc = tempNav.iconCRC;
-        latestNavigation = tempNav;
-        hasNewNavigation = true;
-      }
-    }
-  }
 }
 
 void saveSettings() {
@@ -562,14 +429,14 @@ ButtonAction getButtonAction() {
   static unsigned long multiClickWindow = 400;
   static unsigned long longPressTime = 1000;
   static unsigned long pressTime = 0;
-
+  
   ButtonAction action = ACTION_NONE;
   int reading = digitalRead(BUTTON_PIN);
 
   if (reading != lastState) {
     lastDebounceTime = millis();
   }
-
+  
   if ((millis() - lastDebounceTime) > debounceDelay) {
     if (reading != currentState) {
       currentState = reading;
@@ -591,23 +458,14 @@ ButtonAction getButtonAction() {
       clickCount = 0;
     }
   }
-
+  
   if (clickCount > 0 && currentState == HIGH && (millis() - lastClickTime > multiClickWindow)) {
-    if (clickCount == 1) {
-      Serial.println("-> Event: SINGLE CLICK");
-      action = ACTION_SINGLE;
-    }
-    if (clickCount == 2) {
-      Serial.println("-> Event: DOUBLE CLICK");
-      action = ACTION_DOUBLE;
-    }
-    if (clickCount == 3) {
-      Serial.println("-> Event: TRIPLE CLICK");
-      action = ACTION_TRIPLE;
-    }
+    if (clickCount == 1) { Serial.println("-> Event: SINGLE CLICK"); action = ACTION_SINGLE; }
+    if (clickCount == 2) { Serial.println("-> Event: DOUBLE CLICK"); action = ACTION_DOUBLE; }
+    if (clickCount == 3) { Serial.println("-> Event: TRIPLE CLICK"); action = ACTION_TRIPLE; }
     clickCount = 0;
   }
-
+  
   lastState = reading;
   return action;
 }
@@ -633,22 +491,6 @@ void handleSerialCommands() {
       ESP.restart();
     }
   }
-}
-
-void drawWatchFace() {
-  getTimeFromRTC();
-  screenSprite.fillSprite(TFT_BLACK);
-
-  if (timeIsSynced) {
-    char timeStr[6];
-    sprintf(timeStr, "%02d:%02d", rtc_hour, rtc_minute);
-    myfont.print((tft.width() - myfont.getLength(timeStr)) / 2, tft.height() / 2 - 10, timeStr, TFT_WHITE, TFT_BLACK);
-    myfont.print((tft.width() - myfont.getLength(timeStr)) / 2 + 1, tft.height() / 2 - 10, timeStr, TFT_WHITE, TFT_BLACK);
-  } else {
-    myfont.print((tft.width() - myfont.getLength("--:--")) / 2, tft.height() / 2 - 10, "--:--", TFT_WHITE, TFT_BLACK);
-  }
-
-  screenSprite.pushSprite(0, 0);
 }
 
 // =======================================================================================
@@ -692,13 +534,11 @@ void setup() {
   secondHandSprite.createSprite(SECOND_HAND_WIDTH, SECOND_HAND_HEIGHT);
   secondHandSprite.setPivot(SECOND_PIVOT_X, SECOND_PIVOT_Y);
   secondHandSprite.pushImage(0, 0, SECOND_HAND_WIDTH, SECOND_HAND_HEIGHT, secondHandImage);
+  
+  chronos_init(&tft, &screenSprite, &myfont);
+  
+  pinMode(BUTTON_PIN, INPUT_PULLUP); 
 
-  Chronos.setConnectionCallback(connectionCallback);
-  Chronos.setNotificationCallback(notificationCallback);
-  Chronos.setConfigurationCallback(configCallback);
-  Chronos.setRingerCallback(ringerCallback);
-  Chronos.begin();
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
   TJpgDec.setJpgScale(1);
   TJpgDec.setSwapBytes(true);
   TJpgDec.setCallback(tft_output);
@@ -706,8 +546,8 @@ void setup() {
 }
 
 void loop() {
-  handleSerialCommands();
-  Chronos.loop();
+  handleSerialCommands(); 
+  chronos_loop();
   ButtonAction action = getButtonAction();
 
   switch (currentMode) {
@@ -947,12 +787,12 @@ void loop() {
         if (action == ACTION_LONG) {
           currentMode = MENU;
           drawMenu();
-          hasNewNotification = false;
-          hasNewNavigation = false;
-          isRinging = false;
+          // hasNewNotification = false;
+          // hasNewNavigation = false;
+          // isRinging = false;
           break;
         }
-        drawWatchFace();
+        chronos_draw_watch_face();
         delay(1000);
         break;
       }
