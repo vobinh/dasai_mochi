@@ -50,16 +50,13 @@ TFT_eSprite hourHandSprite = TFT_eSprite(&tft);
 TFT_eSprite minuteHandSprite = TFT_eSprite(&tft);
 TFT_eSprite secondHandSprite = TFT_eSprite(&tft);
 
-// --- Forward declaration for the pixel drawing function ---
 void setSpritePixel(int16_t x, int16_t y, uint16_t color);
 
 MakeFont myfont(&setSpritePixel);
 
-// --- Biến trạng thái ứng dụng ---
 Mode currentMode = PLAYING;
 AppSettings settings;
 
-// --- Biến cho Video ---
 VideoInfo* flashVideoList[] = { &video01, &video02, &video03, &video04 };
 const uint8_t NUM_FLASH_VIDEOS = sizeof(flashVideoList) / sizeof(flashVideoList[0]);
 std::vector<String> sdVideoList;
@@ -71,8 +68,8 @@ uint16_t currentFrame = 0;
 // --- CÁC HÀM TIỆN ÍCH (HELPER FUNCTIONS) ---
 // =======================================================================================
 
-void saveSettings();  // Forward declaration
-void loadSettings();  // Forward declaration
+void saveSettings();
+void loadSettings();
 
 void setSpritePixel(int16_t x, int16_t y, uint16_t color) {
   screenSprite.drawPixel(x, y, color);
@@ -82,23 +79,19 @@ void handleSerialCommands() {
   if (Serial.available() > 0) {
     String command = Serial.readStringUntil('\n');
     command.trim();
-
     if (command == "reset_config") {
       Serial.println("Received command: reset_config");
       Serial.println("Removing config file...");
-
       if (!SPIFFS.begin(true)) {
         Serial.println("An Error has occurred while mounting SPIFFS");
         return;
       }
-
       if (SPIFFS.exists(CONFIG_FILE)) {
         SPIFFS.remove(CONFIG_FILE);
         Serial.println("Config file removed.");
       } else {
         Serial.println("Config file not found, nothing to remove.");
       }
-
       Serial.println("Restarting to generate new default config...");
       delay(1000);
       ESP.restart();
@@ -128,7 +121,6 @@ ButtonAction getButtonAction() {
     if (reading != currentState) {
       currentState = reading;
       if (currentState == LOW) {
-        Serial.println("Button Pressed");
         clickCount++;
         pressTime = millis();
       } else {
@@ -139,29 +131,15 @@ ButtonAction getButtonAction() {
 
   if (currentState == LOW && (millis() - pressTime > longPressTime)) {
     if (clickCount > 0) {
-      Serial.println("-> Event: LONG PRESS");
       action = ACTION_LONG;
       clickCount = 0;
     }
   }
 
-  if (clickCount > 0 && currentState == HIGH && (millis() - lastClickTime > multiClickWindow))
-  {
-    if (clickCount == 1)
-    {
-      Serial.println("-> Event: SINGLE CLICK");
-      action = ACTION_SINGLE;
-    }
-    if (clickCount == 2)
-    {
-      Serial.println("-> Event: DOUBLE CLICK");
-      action = ACTION_DOUBLE;
-    }
-    if (clickCount == 3)
-    {
-      Serial.println("-> Event: TRIPLE CLICK");
-      action = ACTION_TRIPLE;
-    }
+  if (clickCount > 0 && currentState == HIGH && (millis() - lastClickTime > multiClickWindow)) {
+    if (clickCount == 1) action = ACTION_SINGLE;
+    if (clickCount == 2) action = ACTION_DOUBLE;
+    if (clickCount == 3) action = ACTION_TRIPLE;
     clickCount = 0;
   }
 
@@ -251,7 +229,6 @@ void loop() {
         if (action == ACTION_TRIPLE) {
           currentMode = MENU;
           menu_enter();
-          menu_draw();
           break;
         }
         if (action == ACTION_SINGLE) {
@@ -270,57 +247,55 @@ void loop() {
         break;
       }
 
+    // *** LOGIC ĐÃ ĐƯỢC SỬA LẠI HOÀN TOÀN ***
     case MENU:
       {
+        // Xử lý hành động của người dùng để cập nhật trạng thái menu
         Mode newMode = menu_handle_action(action);
-        if (newMode != MENU) {
 
+        // Nếu hành động gây ra việc thoát khỏi menu
+        if (newMode != MENU) {
           if (menu_manager_save_triggered()) {
             saveSettings();
             loadSettings();
             tft.setRotation(settings.currentRotation);
           }
-
           currentMode = newMode;
           tft.fillScreen(TFT_BLACK);
-
           if (currentMode == GAME_FLAPPY) Flappy::start();
           if (currentMode == GAME_CAR) CarGame::start();
+        } else {
+          // Nếu vẫn ở trong menu, vẽ lại màn hình liên tục
+          // Điều này là BẮT BUỘC để các hiệu ứng hoạt họa hoạt động
+          menu_draw();
         }
         break;
       }
 
-    // *** ĐÃ CẬP NHẬT LẠI ĐẦY ĐỦ LOGIC ĐIỀU KHIỂN GAME ***
     case GAME_FLAPPY:
       {
         if (action == ACTION_DOUBLE) Flappy::togglePause();
         if (action == ACTION_TRIPLE) {
           Flappy::stop();
           currentMode = MENU;
-          menu_enter();  // Quay lại menu và giữ nguyên trạng thái
-          menu_draw();
+          menu_enter();
           break;
         }
-
         static unsigned long lastFlapTime = 0;
         if (digitalRead(BUTTON_PIN) == LOW && Flappy::isRunning() && !Flappy::isPaused()) {
-          if (millis() - lastFlapTime > 120) {  // Debounce cho nút nhấn giữ
+          if (millis() - lastFlapTime > 120) {
             Flappy::flap();
             lastFlapTime = millis();
           }
         }
-
         if (action == ACTION_SINGLE && !Flappy::isRunning()) {
           Flappy::start();
         }
-
         Flappy::tick();
         screenSprite.pushSprite(0, 0);
-
         break;
       }
 
-    // *** ĐÃ CẬP NHẬT LẠI ĐẦY ĐỦ LOGIC ĐIỀU KHIỂN GAME ***
     case GAME_CAR:
       {
         if (action == ACTION_SINGLE) CarGame::moveRight();
@@ -329,17 +304,14 @@ void loop() {
         if (action == ACTION_LONG) {
           CarGame::stop();
           currentMode = MENU;
-          menu_enter();  // Quay lại menu và giữ nguyên trạng thái
-          menu_draw();
+          menu_enter();
           break;
         }
         if (action == ACTION_SINGLE && !CarGame::isRunning()) {
           CarGame::start();
         }
-
         CarGame::tick();
         screenSprite.pushSprite(0, 0);
-
         break;
       }
 
@@ -348,7 +320,6 @@ void loop() {
         if (action == ACTION_LONG) {
           currentMode = MENU;
           menu_enter();
-          menu_draw();
           break;
         }
         chronos_draw_watch_face();
@@ -361,7 +332,6 @@ void loop() {
         if (action == ACTION_LONG) {
           currentMode = MENU;
           menu_enter();
-          menu_draw();
           break;
         }
         drawAnalogWatchFace();

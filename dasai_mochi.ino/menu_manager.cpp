@@ -70,12 +70,15 @@ void menu_draw() {
     draw_menu_internal();
 }
 
+// *** HÀM ĐÃ ĐƯỢC SỬA LẠI HOÀN TOÀN ***
 Mode menu_handle_action(ButtonAction action) {
-    bool needsRedraw = false;
+    // Nếu không có hành động nào, không làm gì cả
+    if (action == ACTION_NONE) {
+        return MENU;
+    }
 
     if (currentEditMode != EDIT_NONE) {
         if (action == ACTION_SINGLE) {
-            needsRedraw = true;
             switch (currentEditMode) {
                 case EDIT_SPEED:
                     temp_settings.frameDelay += 5;
@@ -98,7 +101,6 @@ Mode menu_handle_action(ButtonAction action) {
             }
         } else if (action == ACTION_LONG) {
             currentEditMode = EDIT_NONE;
-            needsRedraw = true;
         }
     } 
     else {
@@ -106,7 +108,6 @@ Mode menu_handle_action(ButtonAction action) {
             currentTab = (currentTab == TAB_SETTING) ? TAB_MODE : TAB_SETTING;
             selectedMenuItem = 0;
             menuScrollOffset = 0;
-            needsRedraw = true;
         } else if (action == ACTION_SINGLE) {
             int maxItems = (currentTab == TAB_SETTING) ? NUM_SETTING_ITEMS : NUM_MODE_ITEMS;
             selectedMenuItem = (selectedMenuItem + 1) % maxItems;
@@ -117,15 +118,14 @@ Mode menu_handle_action(ButtonAction action) {
             } else if (selectedMenuItem < menuScrollOffset) {
                 menuScrollOffset = selectedMenuItem;
             }
-            needsRedraw = true;
         } else if (action == ACTION_LONG) {
             if (currentTab == TAB_SETTING) {
                 switch (selectedMenuItem) {
-                    case 0: currentEditMode = EDIT_SPEED; needsRedraw = true; break;
-                    case 1: currentEditMode = EDIT_ROTATION; needsRedraw = true; break;
-                    case 2: currentEditMode = EDIT_LANGUAGE; needsRedraw = true; break;
-                    case 3: currentEditMode = EDIT_SD; needsRedraw = true; break;
-                    case 4: currentEditMode = EDIT_NOTIF_TIME; needsRedraw = true; break;
+                    case 0: currentEditMode = EDIT_SPEED; break;
+                    case 1: currentEditMode = EDIT_ROTATION; break;
+                    case 2: currentEditMode = EDIT_LANGUAGE; break;
+                    case 3: currentEditMode = EDIT_SD; break;
+                    case 4: currentEditMode = EDIT_NOTIF_TIME; break;
                     case 5: // Save
                         memcpy(app_settings, &temp_settings, sizeof(AppSettings));
                         save_was_triggered = true;
@@ -146,11 +146,7 @@ Mode menu_handle_action(ButtonAction action) {
         }
     }
 
-    if (needsRedraw) {
-        draw_menu_internal();
-    }
-
-    return MENU;
+    return MENU; // Mặc định là vẫn ở trong menu
 }
 
 String menu_manager_get_temp_lang() {
@@ -227,13 +223,12 @@ static void draw_menu_internal() {
       if (i == 4) valueStr = String(temp_settings.notificationTimeout) + "s";
     }
 
-    // *** LOGIC SỬA LỖI ĐƯỢC TRIỂN KHAI TẠI ĐÂY ***
     int totalAvailableWidth = tft->width() - paddingX * 2 - scrollbarWidth - 10;
     int titleDrawWidth;
 
     if (currentTab == TAB_SETTING && valueStr.length() > 0) {
         int valueWidth = myfont->getLength(valueStr);
-        titleDrawWidth = totalAvailableWidth - valueWidth - 10; // Trừ đi chiều rộng của value và 10px padding
+        titleDrawWidth = totalAvailableWidth - valueWidth - 10;
     } else {
         titleDrawWidth = totalAvailableWidth;
     }
