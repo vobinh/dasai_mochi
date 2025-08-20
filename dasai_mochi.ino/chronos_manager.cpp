@@ -3,10 +3,10 @@
 #include <vector>
 #include <time.h>
 
-// --- CÁC BIẾN TOÀN CỤC (CHỈ DÙNG TRONG FILE NÀY) ---
 static TFT_eSPI* _tft;
 static TFT_eSprite* _sprite;
 static MakeFont* _font;
+static AppSettings* _settings;
 
 static ChronosESP32 Chronos("Mochi Watch");
 
@@ -25,18 +25,12 @@ static int messageScrollLine = 0;
 static unsigned long lastMessageScrollTime = 0;
 static bool isNotificationScrolling = false;
 
-// Biến RTC giờ đây được quản lý trong file này
 static bool timeIsSynced = false;
 static uint8_t rtc_hour, rtc_minute, rtc_second, rtc_day, rtc_month;
 static uint16_t rtc_year;
 
-extern int notificationTimeout; 
-
-// --- CÁC HÀM NỘI BỘ ---
-
 static void syncTimeToRTC() {
     if (!Chronos.isConnected()) return;
-
     struct tm timeinfo;
     timeinfo.tm_year = Chronos.getYear() - 1900;
     timeinfo.tm_mon = Chronos.getMonth() - 1;
@@ -44,23 +38,19 @@ static void syncTimeToRTC() {
     timeinfo.tm_hour = Chronos.getHourC();
     timeinfo.tm_min = Chronos.getMinute();
     timeinfo.tm_sec = Chronos.getSecond();
-
     time_t t = mktime(&timeinfo);
     struct timeval now = { .tv_sec = t };
     settimeofday(&now, NULL);
-
     timeIsSynced = true;
     Serial.println("RTC Synced from Bluetooth.");
 }
 
 static void getTimeFromRTC() {
     if (!timeIsSynced) return;
-
     struct tm timeinfo;
     time_t now;
     time(&now);
     localtime_r(&now, &timeinfo);
-
     rtc_hour = timeinfo.tm_hour;
     rtc_minute = timeinfo.tm_min;
     rtc_second = timeinfo.tm_sec;
@@ -102,8 +92,6 @@ static void wrapMessage(String text) {
     if (currentLine.length() > 0) wrappedMessageLines.push_back(currentLine);
 }
 
-// --- CÁC HÀM CALLBACK CỦA CHRONOS ---
-
 static void connectionCallback(bool state) {
     isConnected = state;
     if (state) {
@@ -119,7 +107,6 @@ static void notificationCallback(Notification notification) {
     wrapMessage(latestNotification.message); 
     messageScrollLine = 0; 
     lastMessageScrollTime = millis();
-    
     const int boxH = 200;
     const int lineHeight = 22;
     const int textPadding = 8;
@@ -154,14 +141,11 @@ static void configCallback(Config config, uint32_t a, uint32_t b) {
     }
 }
 
-
-// --- CÁC HÀM CÔNG KHAI ---
-
-void chronos_init(TFT_eSPI* tft, TFT_eSprite* sprite, MakeFont* font) {
+void chronos_init(TFT_eSPI* tft, TFT_eSprite* sprite, MakeFont* font, AppSettings* settings) {
     _tft = tft;
     _sprite = sprite;
     _font = font;
-
+    _settings = settings;
     Chronos.setConnectionCallback(connectionCallback);
     Chronos.setNotificationCallback(notificationCallback);
     Chronos.setConfigurationCallback(configCallback);
@@ -171,7 +155,7 @@ void chronos_init(TFT_eSPI* tft, TFT_eSprite* sprite, MakeFont* font) {
 
 void chronos_loop() {
     Chronos.loop();
-    getTimeFromRTC(); // Cập nhật thời gian RTC liên tục
+    getTimeFromRTC();
 }
 
 void chronos_draw_watch_face() {
@@ -189,11 +173,11 @@ void chronos_draw_watch_face() {
     if (hasNewNotification) {
         bool hideNow = false;
         if (!isNotificationScrolling) { 
-            if (millis() - notificationDisplayTime > notificationTimeout * 1000) {
+            if (millis() - notificationDisplayTime > _settings->notificationTimeout * 1000) {
                 hideNow = true;
             }
         } else if (scrollFinished) { 
-            if (millis() - lastMessageScrollTime > notificationTimeout * 1000) {
+            if (millis() - lastMessageScrollTime > _settings->notificationTimeout * 1000) {
                 hideNow = true;
             }
         }
@@ -212,7 +196,6 @@ void chronos_draw_watch_face() {
         _font->print((_tft->width() - _font->getLength(callerInfo)) / 2, _tft->height() / 2, callerInfo, TFT_WHITE, TFT_BLACK);
         _sprite->fillCircle(_tft->width() / 4, _tft->height() - 50, 30, TFT_GREEN);
         _sprite->fillCircle(_tft->width() * 3 / 4, _tft->height() - 50, 30, TFT_RED);
-
     } else if (hasNewNavigation) {
         if (nav_icon_crc != 0xFFFFFFFF) {
             int iconSize = 96;
@@ -232,39 +215,30 @@ void chronos_draw_watch_face() {
         _font->print(15, 160, latestNavigation.directions, TFT_WHITE, TFT_BLACK);
         String footer = String(latestNavigation.distance) + " - " + String(latestNavigation.eta);
         _font->print((_tft->width() - _font->getLength(footer)) / 2, _tft->height() - 30, footer, TFT_WHITE, TFT_BLACK);
-        
     } else if (hasNewNotification) {
         const int boxX = 5, boxY = 10, boxW = 230, boxH = 200, cornerRadius = 10;
         const int textPadding = 8;
         const int lineHeight = 22;
-
         _sprite->drawRoundRect(boxX, boxY, boxW, boxH, cornerRadius, TFT_CYAN);
-
         String appName = latestNotification.app;
         _font->print(_tft->width() - _font->getLength(appName) - 15, _tft->height() - 30, appName, TFT_CYAN, TFT_BLACK);
-        
         int maxLines = (boxH - textPadding * 2) / lineHeight;
-
         if (isNotificationScrolling && !scrollFinished) {
             if (millis() - lastMessageScrollTime > 1500) {
                 lastMessageScrollTime = millis();
                 messageScrollLine++;
             }
         }
-        
         _sprite->fillRect(boxX + textPadding, boxY + textPadding, boxW - textPadding*2, boxH - textPadding*2, TFT_BLACK);
-
         for (int i = 0; i < maxLines; i++) {
             int lineIndex = messageScrollLine + i;
             if (lineIndex < wrappedMessageLines.size()) {
                 _font->print(boxX + textPadding, boxY + textPadding + i * lineHeight, wrappedMessageLines[lineIndex], TFT_WHITE, TFT_BLACK);
             }
         }
-
     } else if (!isConnected) {
         String msg = "Đã ngắt kết nối";
         _font->print((_tft->width() - _font->getLength(msg)) / 2, _tft->height() / 2, msg, TFT_RED, TFT_BLACK);
-
     } else { 
         char timeStr[6];
         sprintf(timeStr, "%02d:%02d", rtc_hour, rtc_minute);
@@ -275,7 +249,6 @@ void chronos_draw_watch_face() {
     _sprite->pushSprite(0, 0);
 }
 
-// --- Các hàm getter ---
 bool chronos_is_time_synced() { return timeIsSynced; }
 uint8_t chronos_get_hour() { return rtc_hour; }
 uint8_t chronos_get_minute() { return rtc_minute; }
