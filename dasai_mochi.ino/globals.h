@@ -29,6 +29,7 @@ struct AppSettings {
   String currentLang;
   bool useSD;
   int notificationTimeout;
+  int marqueeSpeed; // *** BIẾN MỚI ĐỂ LƯU TỐC ĐỘ CHỮ CHẠY ***
 };
 
 #endif

@@ -16,23 +16,23 @@ static enum EditMode {
     EDIT_ROTATION, 
     EDIT_LANGUAGE, 
     EDIT_SD, 
-    EDIT_NOTIF_TIME 
+    EDIT_NOTIF_TIME,
+    EDIT_MARQUEE_SPEED // *** THÊM TRẠNG THÁI CHỈNH SỬA MỚI ***
 } currentEditMode;
 
 static int selectedMenuItem = 0;
 static int menuScrollOffset = 0;
 static AppSettings temp_settings;
 
-static const int NUM_SETTING_ITEMS = 7;
+// *** TĂNG SỐ LƯỢNG MỤC CÀI ĐẶT LÊN 8 ***
+static const int NUM_SETTING_ITEMS = 8;
 static const int NUM_MODE_ITEMS = 5;
 static String settingMenuItems[NUM_SETTING_ITEMS];
 static String modeMenuItems[NUM_MODE_ITEMS];
 static String tabNames[2];
 
 static const int MAX_VISIBLE_ITEMS = 6;
-
 static bool save_was_triggered = false;
-
 static void draw_menu_internal();
 
 // =======================================================================================
@@ -70,9 +70,7 @@ void menu_draw() {
     draw_menu_internal();
 }
 
-// *** HÀM ĐÃ ĐƯỢC SỬA LẠI HOÀN TOÀN ***
 Mode menu_handle_action(ButtonAction action) {
-    // Nếu không có hành động nào, không làm gì cả
     if (action == ACTION_NONE) {
         return MENU;
     }
@@ -96,6 +94,11 @@ Mode menu_handle_action(ButtonAction action) {
                 case EDIT_NOTIF_TIME:
                     temp_settings.notificationTimeout++;
                     if (temp_settings.notificationTimeout > 10) temp_settings.notificationTimeout = 3;
+                    break;
+                // *** THÊM LOGIC CHỈNH SỬA TỐC ĐỘ CHỮ ***
+                case EDIT_MARQUEE_SPEED:
+                    temp_settings.marqueeSpeed -= 5; // Số nhỏ hơn = nhanh hơn
+                    if (temp_settings.marqueeSpeed < 10) temp_settings.marqueeSpeed = 50;
                     break;
                 default: break;
             }
@@ -126,11 +129,13 @@ Mode menu_handle_action(ButtonAction action) {
                     case 2: currentEditMode = EDIT_LANGUAGE; break;
                     case 3: currentEditMode = EDIT_SD; break;
                     case 4: currentEditMode = EDIT_NOTIF_TIME; break;
-                    case 5: // Save
+                    // *** THÊM LỰA CHỌN MỚI, CẬP NHẬT INDEX CỦA LƯU VÀ THOÁT ***
+                    case 5: currentEditMode = EDIT_MARQUEE_SPEED; break;
+                    case 6: // Save
                         memcpy(app_settings, &temp_settings, sizeof(AppSettings));
                         save_was_triggered = true;
                         return PLAYING;
-                    case 6: // Exit
+                    case 7: // Exit
                         save_was_triggered = false;
                         return PLAYING;
                 }
@@ -146,7 +151,7 @@ Mode menu_handle_action(ButtonAction action) {
         }
     }
 
-    return MENU; // Mặc định là vẫn ở trong menu
+    return MENU;
 }
 
 String menu_manager_get_temp_lang() {
@@ -191,6 +196,7 @@ static void draw_menu_internal() {
     if (currentEditMode == EDIT_LANGUAGE) itemToHighlight = 2;
     if (currentEditMode == EDIT_SD) itemToHighlight = 3;
     if (currentEditMode == EDIT_NOTIF_TIME) itemToHighlight = 4;
+    if (currentEditMode == EDIT_MARQUEE_SPEED) itemToHighlight = 5; // *** THÊM HIGHLIGHT MỚI ***
   }
 
   int startItem = menuScrollOffset;
@@ -221,6 +227,7 @@ static void draw_menu_internal() {
       if (i == 2) valueStr = (temp_settings.currentLang == "vi") ? "VI" : "EN";
       if (i == 3) valueStr = temp_settings.useSD ? "ON" : "OFF";
       if (i == 4) valueStr = String(temp_settings.notificationTimeout) + "s";
+      if (i == 5) valueStr = String(temp_settings.marqueeSpeed); // *** HIỂN THỊ GIÁ TRỊ MỚI ***
     }
 
     int totalAvailableWidth = tft->width() - paddingX * 2 - scrollbarWidth - 10;
@@ -233,7 +240,8 @@ static void draw_menu_internal() {
         titleDrawWidth = totalAvailableWidth;
     }
     
-    drawMarqueeText(screenSprite, myfont, title, paddingX + 5, currentY, titleDrawWidth, textColor, bgColor, isSelected);
+    // *** TRUYỀN TỐC ĐỘ VÀO HÀM VẼ ***
+    drawMarqueeText(screenSprite, myfont, title, paddingX + 5, currentY, titleDrawWidth, textColor, bgColor, isSelected, temp_settings.marqueeSpeed);
 
     if (valueStr.length() > 0) {
       int textW = myfont->getLength(valueStr);

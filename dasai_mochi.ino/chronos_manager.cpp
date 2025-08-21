@@ -3,6 +3,19 @@
 #include <vector>
 #include <time.h>
 
+// =======================================================================================
+// --- CẤU TRÚC DỮ LIỆU VÀ BIẾN CHO HIỆU ỨNG MỚI ---
+// =======================================================================================
+struct RainParticle {
+    float x, y;
+    float speed;
+    char character;
+};
+
+#define NUM_RAIN_PARTICLES 100
+static std::vector<RainParticle> rainParticles;
+
+// --- CÁC BIẾN TOÀN CỤC (CHỈ DÙNG TRONG FILE NÀY) ---
 static TFT_eSPI* _tft;
 static TFT_eSprite* _sprite;
 static MakeFont* _font;
@@ -29,6 +42,8 @@ static bool timeIsSynced = false;
 static uint8_t rtc_hour, rtc_minute, rtc_second, rtc_day, rtc_month;
 static uint16_t rtc_year;
 
+// --- CÁC HÀM NỘI BỘ ---
+
 static void syncTimeToRTC() {
     if (!Chronos.isConnected()) return;
     struct tm timeinfo;
@@ -42,7 +57,6 @@ static void syncTimeToRTC() {
     struct timeval now = { .tv_sec = t };
     settimeofday(&now, NULL);
     timeIsSynced = true;
-    Serial.println("RTC Synced from Bluetooth.");
 }
 
 static void getTimeFromRTC() {
@@ -91,6 +105,8 @@ static void wrapMessage(String text) {
     }
     if (currentLine.length() > 0) wrappedMessageLines.push_back(currentLine);
 }
+
+// --- CÁC HÀM CALLBACK CỦA CHRONOS ---
 
 static void connectionCallback(bool state) {
     isConnected = state;
@@ -141,11 +157,25 @@ static void configCallback(Config config, uint32_t a, uint32_t b) {
     }
 }
 
+
+// --- CÁC HÀM CÔNG KHAI ---
+
 void chronos_init(TFT_eSPI* tft, TFT_eSprite* sprite, MakeFont* font, AppSettings* settings) {
     _tft = tft;
     _sprite = sprite;
     _font = font;
     _settings = settings;
+
+    // Khởi tạo các hạt mưa số
+    for (int i = 0; i < NUM_RAIN_PARTICLES; i++) {
+        RainParticle p;
+        p.x = random(0, _tft->width());
+        p.y = random(0, _tft->height());
+        p.speed = random(2, 6);
+        p.character = (char)random(48, 58); // Ký tự số từ '0' đến '9'
+        rainParticles.push_back(p);
+    }
+
     Chronos.setConnectionCallback(connectionCallback);
     Chronos.setNotificationCallback(notificationCallback);
     Chronos.setConfigurationCallback(configCallback);
@@ -158,97 +188,77 @@ void chronos_loop() {
     getTimeFromRTC();
 }
 
+// *** HÀM VẼ MẶT ĐỒNG HỒ ĐÃ ĐƯỢC VIẾT LẠI HOÀN TOÀN ***
 void chronos_draw_watch_face() {
-    bool scrollFinished = false;
-    if (isNotificationScrolling) {
-        const int boxH = 200;
-        const int textPadding = 8;
-        const int lineHeight = 22;
-        int maxLines = (boxH - textPadding * 2) / lineHeight;
-        if (wrappedMessageLines.size() <= maxLines || messageScrollLine > wrappedMessageLines.size() - maxLines) {
-            scrollFinished = true;
-        }
-    }
-
-    if (hasNewNotification) {
-        bool hideNow = false;
-        if (!isNotificationScrolling) { 
-            if (millis() - notificationDisplayTime > _settings->notificationTimeout * 1000) {
-                hideNow = true;
-            }
-        } else if (scrollFinished) { 
-            if (millis() - lastMessageScrollTime > _settings->notificationTimeout * 1000) {
-                hideNow = true;
-            }
-        }
-        if (millis() - notificationDisplayTime > 10000) {
-            hideNow = true;
-        }
-        if (hideNow) {
-            hasNewNotification = false;
-        }
+    // Xử lý ẩn thông báo
+    if (hasNewNotification && (millis() - notificationDisplayTime > _settings->notificationTimeout * 1000)) {
+        hasNewNotification = false;
     }
 
     _sprite->fillSprite(TFT_BLACK);
+
+    // --- VẼ HIỆU ỨNG NỀN ---
+    for (auto& p : rainParticles) {
+        // Cập nhật vị trí
+        p.y += p.speed;
+        if (p.y > _tft->height()) {
+            p.y = 0;
+            p.x = random(0, _tft->width());
+        }
+        // Vẽ hạt mưa với màu tối
+        _sprite->drawChar(p.x, p.y, p.character, TFT_DARKGREEN, TFT_BLACK, 1);
+    }
     
+    // --- VẼ CÁC THÔNG TIN CHÍNH ---
     if (isRinging) {
         _font->print((_tft->width() - _font->getLength("CUỘC GỌI ĐẾN")) / 2, 30, "CUỘC GỌI ĐẾN", TFT_WHITE, TFT_BLACK);
         _font->print((_tft->width() - _font->getLength(callerInfo)) / 2, _tft->height() / 2, callerInfo, TFT_WHITE, TFT_BLACK);
         _sprite->fillCircle(_tft->width() / 4, _tft->height() - 50, 30, TFT_GREEN);
         _sprite->fillCircle(_tft->width() * 3 / 4, _tft->height() - 50, 30, TFT_RED);
     } else if (hasNewNavigation) {
-        if (nav_icon_crc != 0xFFFFFFFF) {
-            int iconSize = 96;
-            int pixelSize = iconSize / 48;
-            for (int y = 0; y < 48; y++) {
-                for (int x = 0; x < 48; x++) {
-                    int byte_index = (y * 48 + x) / 8;
-                    int bit_pos = 7 - (x % 8);
-                    bool px_on = (latestNavigation.icon[byte_index] >> bit_pos) & 0x01;
-                    if (px_on) {
-                        _sprite->fillRect(10 + x * pixelSize, 10 + y * pixelSize, pixelSize, pixelSize, TFT_WHITE);
-                    }
-                }
-            }
-        }
         _font->print(15, 120, latestNavigation.title, TFT_WHITE, TFT_BLACK);
         _font->print(15, 160, latestNavigation.directions, TFT_WHITE, TFT_BLACK);
         String footer = String(latestNavigation.distance) + " - " + String(latestNavigation.eta);
         _font->print((_tft->width() - _font->getLength(footer)) / 2, _tft->height() - 30, footer, TFT_WHITE, TFT_BLACK);
     } else if (hasNewNotification) {
-        const int boxX = 5, boxY = 10, boxW = 230, boxH = 200, cornerRadius = 10;
-        const int textPadding = 8;
-        const int lineHeight = 22;
-        _sprite->drawRoundRect(boxX, boxY, boxW, boxH, cornerRadius, TFT_CYAN);
-        String appName = latestNotification.app;
-        _font->print(_tft->width() - _font->getLength(appName) - 15, _tft->height() - 30, appName, TFT_CYAN, TFT_BLACK);
-        int maxLines = (boxH - textPadding * 2) / lineHeight;
-        if (isNotificationScrolling && !scrollFinished) {
-            if (millis() - lastMessageScrollTime > 1500) {
-                lastMessageScrollTime = millis();
-                messageScrollLine++;
-            }
-        }
-        _sprite->fillRect(boxX + textPadding, boxY + textPadding, boxW - textPadding*2, boxH - textPadding*2, TFT_BLACK);
-        for (int i = 0; i < maxLines; i++) {
-            int lineIndex = messageScrollLine + i;
-            if (lineIndex < wrappedMessageLines.size()) {
-                _font->print(boxX + textPadding, boxY + textPadding + i * lineHeight, wrappedMessageLines[lineIndex], TFT_WHITE, TFT_BLACK);
-            }
-        }
+        _font->print(15, 30, latestNotification.title, TFT_WHITE, TFT_BLACK);
+        _font->print(15, 60, latestNotification.message, TFT_WHITE, TFT_BLACK);
     } else if (!isConnected) {
-        String msg = "Đã ngắt kết nối";
+        String msg = "ĐÃ NGẮT KẾT NỐI";
         _font->print((_tft->width() - _font->getLength(msg)) / 2, _tft->height() / 2, msg, TFT_RED, TFT_BLACK);
     } else { 
+        // --- VẼ ĐỒNG HỒ SỐ VỚI FONT MỚI ---
+        // _sprite->loadFont(digital_font);
+        _sprite->setFreeFont(&DigitaltsLime35pt7b);
+        
         char timeStr[6];
-        sprintf(timeStr, "%02d:%02d", rtc_hour, rtc_minute);
-        _font->print((_tft->width() - _font->getLength(timeStr))/2, _tft->height() / 2 - 10, timeStr, TFT_WHITE, TFT_BLACK);
-        _font->print((_tft->width() - _font->getLength(timeStr))/2 + 1, _tft->height() / 2 - 10, timeStr, TFT_WHITE, TFT_BLACK);
+        sprintf(timeStr, "%02d:%02d:%02d", rtc_hour, rtc_minute, rtc_second);
+        
+        // Căn giữa thời gian trên màn hình
+        int textWidth = _sprite->textWidth(timeStr);
+        int textHeight = 50; // Chiều cao của font
+        int x_pos = (_tft->width() - textWidth) / 2;
+        int y_pos = (_tft->height() - textHeight) / 2;
+
+        _sprite->setTextColor(TFT_CYAN, TFT_BLACK);
+        _sprite->drawString(timeStr, x_pos, y_pos);
+        _sprite->setFreeFont(NULL);
+        // _sprite->unloadFont();
+
+        // Vẽ ngày tháng và giây bằng font cũ
+        char dateStr[10];
+        sprintf(dateStr, "%02d/%02d/%d", rtc_day, rtc_month, rtc_year);
+        _font->print((_tft->width() - _font->getLength(dateStr)) / 2, y_pos + textHeight + 10, dateStr, TFT_WHITE, TFT_BLACK);
+        
+        // char secStr[4];
+        // sprintf(secStr, ":%02d", rtc_second);
+        // _font->print((_tft->width() - _font->getLength(secStr)) / 2, y_pos - 20, secStr, TFT_WHITE, TFT_BLACK);
     }
     
     _sprite->pushSprite(0, 0);
 }
 
+// --- Các hàm getter ---
 bool chronos_is_time_synced() { return timeIsSynced; }
 uint8_t chronos_get_hour() { return rtc_hour; }
 uint8_t chronos_get_minute() { return rtc_minute; }

@@ -6,6 +6,7 @@
 #include <SPI.h>
 #include <vector>
 #include <time.h>
+
 #include "FontMaker.h"
 
 // --- INCLUDE CÁC MODULE QUẢN LÝ ---
@@ -247,13 +248,9 @@ void loop() {
         break;
       }
 
-    // *** LOGIC ĐÃ ĐƯỢC SỬA LẠI HOÀN TOÀN ***
     case MENU:
       {
-        // Xử lý hành động của người dùng để cập nhật trạng thái menu
         Mode newMode = menu_handle_action(action);
-
-        // Nếu hành động gây ra việc thoát khỏi menu
         if (newMode != MENU) {
           if (menu_manager_save_triggered()) {
             saveSettings();
@@ -265,8 +262,6 @@ void loop() {
           if (currentMode == GAME_FLAPPY) Flappy::start();
           if (currentMode == GAME_CAR) CarGame::start();
         } else {
-          // Nếu vẫn ở trong menu, vẽ lại màn hình liên tục
-          // Điều này là BẮT BUỘC để các hiệu ứng hoạt họa hoạt động
           menu_draw();
         }
         break;
@@ -315,6 +310,7 @@ void loop() {
         break;
       }
 
+    // *** ĐÃ SỬA LỖI Ở ĐÂY: XÓA DELAY ĐỂ HOẠT ẢNH CHẠY MƯỢT ***
     case WATCH_MODE:
       {
         if (action == ACTION_LONG) {
@@ -323,7 +319,7 @@ void loop() {
           break;
         }
         chronos_draw_watch_face();
-        delay(1000);
+        // delay(1000); // Xóa dòng này
         break;
       }
 
@@ -355,6 +351,7 @@ void saveSettings() {
   doc["language"] = settings.currentLang;
   doc["useSD"] = settings.useSD;
   doc["notificationTimeout"] = settings.notificationTimeout;
+  doc["marqueeSpeed"] = settings.marqueeSpeed;
 
   JsonObject menu_vi = doc.createNestedObject("menu_vi");
   menu_vi["tab_setting"] = "Cài đặt";
@@ -365,8 +362,9 @@ void saveSettings() {
   setting_vi["item2"] = "Ngôn ngữ";
   setting_vi["item3"] = "Thẻ SD";
   setting_vi["item4"] = "TG Thông Báo";
-  setting_vi["item5"] = "Lưu";
-  setting_vi["item6"] = "Thoát";
+  setting_vi["item5"] = "Tốc độ chữ";
+  setting_vi["item6"] = "Lưu";
+  setting_vi["item7"] = "Thoát";
   JsonObject mode_vi = menu_vi.createNestedObject("mode");
   mode_vi["item0"] = "Chơi Flappy";
   mode_vi["item1"] = "Chơi Đua Xe";
@@ -383,8 +381,9 @@ void saveSettings() {
   setting_en["item2"] = "Language";
   setting_en["item3"] = "SD Card";
   setting_en["item4"] = "Notif. Time";
-  setting_en["item5"] = "Save";
-  setting_en["item6"] = "Exit";
+  setting_en["item5"] = "Marquee Speed";
+  setting_en["item6"] = "Save";
+  setting_en["item7"] = "Exit";
   JsonObject mode_en = menu_en.createNestedObject("mode");
   mode_en["item0"] = "Play Flappy";
   mode_en["item1"] = "Play Car Game";
@@ -413,6 +412,7 @@ void loadSettings() {
       settings.currentLang = doc["language"] | "vi";
       settings.useSD = doc["useSD"] | false;
       settings.notificationTimeout = doc["notificationTimeout"] | 5;
+      settings.marqueeSpeed = doc["marqueeSpeed"] | 35;
       menu_load_strings(doc.as<JsonObject>());
       success = true;
     }
@@ -426,6 +426,7 @@ void loadSettings() {
     settings.currentLang = "vi";
     settings.useSD = false;
     settings.notificationTimeout = 5;
+    settings.marqueeSpeed = 35;
 
     StaticJsonDocument<1024> default_doc;
     JsonObject menu_vi = default_doc.createNestedObject("menu_vi");
@@ -433,14 +434,15 @@ void loadSettings() {
     menu_vi["tab_mode"] = "Chế độ";
     JsonObject setting_vi = menu_vi.createNestedObject("setting");
     setting_vi["item0"] = "Tốc độ video";
-    setting_vi["item1"] = "Xoay màn hình test cho day để coi chạy được không";
+    setting_vi["item1"] = "Xoay màn hình";
     setting_vi["item2"] = "Ngôn ngữ";
     setting_vi["item3"] = "Thẻ SD";
     setting_vi["item4"] = "TG Thông Báo";
-    setting_vi["item5"] = "Lưu";
-    setting_vi["item6"] = "Thoát";
-    JsonObject mode_vi = menu_vi.createNestedObject("mode");
-    mode_vi["item0"] = "Chơi Flappy test cho day để coi chạy được không";
+    setting_vi["item5"] = "Tốc độ chữ";
+    setting_vi["item6"] = "Lưu";
+    setting_vi["item7"] = "Thoát";
+    JsonObject mode_vi = default_doc.createNestedObject("mode");
+    mode_vi["item0"] = "Chơi Flappy";
     mode_vi["item1"] = "Chơi Đua Xe";
     mode_vi["item2"] = "Đồng hồ số";
     mode_vi["item3"] = "Đồng hồ kim";
@@ -455,8 +457,9 @@ void loadSettings() {
     setting_en["item2"] = "Language";
     setting_en["item3"] = "SD Card";
     setting_en["item4"] = "Notif. Time";
-    setting_en["item5"] = "Save";
-    setting_en["item6"] = "Exit";
+    setting_en["item5"] = "Marquee Speed";
+    setting_en["item6"] = "Save";
+    setting_en["item7"] = "Exit";
     JsonObject mode_en = menu_en.createNestedObject("mode");
     mode_en["item0"] = "Play Flappy";
     mode_en["item1"] = "Play Car Game";

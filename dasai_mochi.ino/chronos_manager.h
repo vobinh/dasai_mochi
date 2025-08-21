@@ -3,7 +3,8 @@
 
 #include <TFT_eSPI.h>
 #include "FontMaker.h"
-#include "globals.h"
+#include "globals.h" 
+#include "DigitaltsLime35pt7b.h" // *** BAO GỒM FILE FONT MỚI ***
 
 void chronos_init(TFT_eSPI* tft, TFT_eSprite* sprite, MakeFont* font, AppSettings* settings);
 void chronos_loop();
