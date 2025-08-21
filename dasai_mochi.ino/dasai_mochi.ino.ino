@@ -6,45 +6,26 @@
 #include <SPI.h>
 #include <vector>
 #include <time.h>
-
 #include "FontMaker.h"
 
-// --- INCLUDE CÁC MODULE QUẢN LÝ ---
 #include "globals.h"
 #include "menu_manager.h"
 #include "flappy_game.h"
 #include "car_game.h"
-
 #include "background_image.h"
 #include "hour_hand.h"
 #include "minute_hand.h"
 #include "second_hand.h"
 #include "chronos_manager.h"
+#include "DigitaltsLime35pt7b.h"
 
-// =======================================================================================
 // --- CẤU HÌNH ---
-// =======================================================================================
 #define BUTTON_PIN 0
 #define VIDEO_JUMP_TARGET 2
 #define CONFIG_FILE "/config.json"
 #define SD_CS_PIN 7
 
-// --- Định nghĩa Struct Video ---
-typedef struct _VideoInfo {
-  const uint8_t* const* frames;
-  const uint16_t* frames_size;
-  uint16_t num_frames;
-} VideoInfo;
-
-// --- Khai báo các file video ---
-#include "video01.h"
-#include "video02.h"
-#include "video03.h"
-#include "video04.h"
-
-// =======================================================================================
-// --- KHỞI TẠO BIẾN TOÀN CỤC ---
-// =======================================================================================
+// --- CÁC BIẾN TOÀN CỤC ---
 TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite screenSprite = TFT_eSprite(&tft);
 TFT_eSprite hourHandSprite = TFT_eSprite(&tft);
@@ -52,26 +33,32 @@ TFT_eSprite minuteHandSprite = TFT_eSprite(&tft);
 TFT_eSprite secondHandSprite = TFT_eSprite(&tft);
 
 void setSpritePixel(int16_t x, int16_t y, uint16_t color);
-
 MakeFont myfont(&setSpritePixel);
 
 Mode currentMode = PLAYING;
 AppSettings settings;
 
+// --- BIẾN CHO VIDEO ---
+typedef struct _VideoInfo {
+  const uint8_t* const* frames;
+  const uint16_t* frames_size;
+  uint16_t num_frames;
+} VideoInfo;
+#include "video01.h"
+#include "video02.h"
+#include "video03.h"
+#include "video04.h"
 VideoInfo* flashVideoList[] = { &video01, &video02, &video03, &video04 };
 const uint8_t NUM_FLASH_VIDEOS = sizeof(flashVideoList) / sizeof(flashVideoList[0]);
-std::vector<String> sdVideoList;
-bool sdCardOk = false;
 uint8_t currentVideoIndex = 0;
 uint16_t currentFrame = 0;
 
-// =======================================================================================
-// --- CÁC HÀM TIỆN ÍCH (HELPER FUNCTIONS) ---
-// =======================================================================================
-
+// --- KHAI BÁO HÀM ---
 void saveSettings();
 void loadSettings();
+void drawDigitalWatchFace();
 
+// --- CÁC HÀM TIỆN ÍCH ---
 void setSpritePixel(int16_t x, int16_t y, uint16_t color) {
   screenSprite.drawPixel(x, y, color);
 }
@@ -82,18 +69,9 @@ void handleSerialCommands() {
     command.trim();
     if (command == "reset_config") {
       Serial.println("Received command: reset_config");
-      Serial.println("Removing config file...");
-      if (!SPIFFS.begin(true)) {
-        Serial.println("An Error has occurred while mounting SPIFFS");
-        return;
-      }
-      if (SPIFFS.exists(CONFIG_FILE)) {
-        SPIFFS.remove(CONFIG_FILE);
-        Serial.println("Config file removed.");
-      } else {
-        Serial.println("Config file not found, nothing to remove.");
-      }
-      Serial.println("Restarting to generate new default config...");
+      if (!SPIFFS.begin(true)) { return; }
+      if (SPIFFS.exists(CONFIG_FILE)) { SPIFFS.remove(CONFIG_FILE); }
+      Serial.println("Restarting...");
       delay(1000);
       ESP.restart();
     }
@@ -101,24 +79,13 @@ void handleSerialCommands() {
 }
 
 ButtonAction getButtonAction() {
-  static int lastState = HIGH;
-  static int currentState;
-  static unsigned long lastDebounceTime = 0;
-  static unsigned long debounceDelay = 50;
+  static int lastState = HIGH, currentState;
+  static unsigned long lastDebounceTime = 0, lastClickTime = 0, pressTime = 0;
   static int clickCount = 0;
-  static unsigned long lastClickTime = 0;
-  static unsigned long multiClickWindow = 400;
-  static unsigned long longPressTime = 1000;
-  static unsigned long pressTime = 0;
-
   ButtonAction action = ACTION_NONE;
   int reading = digitalRead(BUTTON_PIN);
-
-  if (reading != lastState) {
-    lastDebounceTime = millis();
-  }
-
-  if ((millis() - lastDebounceTime) > debounceDelay) {
+  if (reading != lastState) { lastDebounceTime = millis(); }
+  if ((millis() - lastDebounceTime) > 50) {
     if (reading != currentState) {
       currentState = reading;
       if (currentState == LOW) {
@@ -129,21 +96,18 @@ ButtonAction getButtonAction() {
       }
     }
   }
-
-  if (currentState == LOW && (millis() - pressTime > longPressTime)) {
+  if (currentState == LOW && (millis() - pressTime > 1000)) {
     if (clickCount > 0) {
       action = ACTION_LONG;
       clickCount = 0;
     }
   }
-
-  if (clickCount > 0 && currentState == HIGH && (millis() - lastClickTime > multiClickWindow)) {
+  if (clickCount > 0 && currentState == HIGH && (millis() - lastClickTime > 400)) {
     if (clickCount == 1) action = ACTION_SINGLE;
     if (clickCount == 2) action = ACTION_DOUBLE;
     if (clickCount == 3) action = ACTION_TRIPLE;
     clickCount = 0;
   }
-
   lastState = reading;
   return action;
 }
@@ -158,6 +122,33 @@ void drawJPEGFrame(const VideoInfo* video, uint16_t frameIndex) {
   const uint8_t* jpg_data = (const uint8_t*)pgm_read_ptr(&video->frames[frameIndex]);
   uint16_t jpg_size = pgm_read_word(&video->frames_size[frameIndex]);
   TJpgDec.drawJpg(0, 0, jpg_data, jpg_size);
+}
+
+// --- CÁC HÀM VẼ MẶT ĐỒNG HỒ (ĐÃ ĐƯỢC DI CHUYỂN RA NGOÀI) ---
+void drawDigitalWatchFace() {
+  screenSprite.fillSprite(TFT_BLACK);
+  // Hiệu ứng mưa số...
+  // (Logic hiệu ứng mưa số sẽ được thêm vào đây nếu cần)
+
+  if (!chronos_is_time_synced()) {
+    String msg = "Dang ket noi...";
+    myfont.print((tft.width() - myfont.getLength(msg)) / 2, tft.height() / 2, msg, TFT_YELLOW, TFT_BLACK);
+  } else {
+    screenSprite.setFreeFont(&DigitaltsLime35pt7b);
+    char timeStr[9];
+    sprintf(timeStr, "%02d:%02d:%02d", chronos_get_hour(), chronos_get_minute(), chronos_get_second());
+    int textWidth = screenSprite.textWidth(timeStr);
+    int x_pos = (tft.width() - textWidth) / 2;
+    int y_pos = (tft.height() - 50) / 2;
+    screenSprite.setTextColor(TFT_CYAN, TFT_BLACK);
+    screenSprite.drawString(timeStr, x_pos, y_pos);
+    screenSprite.setFreeFont(NULL);
+
+    char dateStr[11];
+    sprintf(dateStr, "%02d/%02d/%d", chronos_get_day(), chronos_get_month(), chronos_get_year());
+    myfont.print((tft.width() - myfont.getLength(dateStr)) / 2, y_pos + 50 + 10, dateStr, TFT_WHITE, TFT_BLACK);
+  }
+  screenSprite.pushSprite(0, 0);
 }
 
 void drawAnalogWatchFace() {
@@ -179,14 +170,11 @@ void drawAnalogWatchFace() {
   screenSprite.pushSprite(0, 0);
 }
 
-
 // =======================================================================================
 // --- SETUP & LOOP ---
 // =======================================================================================
-
 void setup() {
   Serial.begin(115200);
-
   tft.begin();
   screenSprite.createSprite(tft.width(), tft.height());
   myfont.set_font(Fira_Code_16);
@@ -224,6 +212,13 @@ void loop() {
   chronos_loop();
   ButtonAction action = getButtonAction();
 
+  // --- BỘ KIỂM TRA ƯU TIÊN ---
+  if (chronos_is_ringing() && currentMode != MENU) {
+    currentMode = WATCH_MODE;
+  } else if (chronos_has_new_notification() && currentMode != MENU && currentMode != GAME_FLAPPY && currentMode != GAME_CAR) {
+    currentMode = WATCH_MODE;
+  }
+
   switch (currentMode) {
     case PLAYING:
       {
@@ -240,7 +235,6 @@ void loop() {
           currentFrame = 0;
         }
 
-        if (currentVideoIndex >= NUM_FLASH_VIDEOS) currentVideoIndex = 0;
         VideoInfo* currentVideo = flashVideoList[currentVideoIndex];
         drawJPEGFrame(currentVideo, currentFrame);
         delay(settings.frameDelay);
@@ -269,23 +263,13 @@ void loop() {
 
     case GAME_FLAPPY:
       {
-        if (action == ACTION_DOUBLE) Flappy::togglePause();
         if (action == ACTION_TRIPLE) {
           Flappy::stop();
           currentMode = MENU;
           menu_enter();
           break;
         }
-        static unsigned long lastFlapTime = 0;
-        if (digitalRead(BUTTON_PIN) == LOW && Flappy::isRunning() && !Flappy::isPaused()) {
-          if (millis() - lastFlapTime > 120) {
-            Flappy::flap();
-            lastFlapTime = millis();
-          }
-        }
-        if (action == ACTION_SINGLE && !Flappy::isRunning()) {
-          Flappy::start();
-        }
+        if (digitalRead(BUTTON_PIN) == LOW) Flappy::flap();
         Flappy::tick();
         screenSprite.pushSprite(0, 0);
         break;
@@ -293,24 +277,20 @@ void loop() {
 
     case GAME_CAR:
       {
-        if (action == ACTION_SINGLE) CarGame::moveRight();
-        if (action == ACTION_DOUBLE) CarGame::moveLeft();
-        if (action == ACTION_TRIPLE) CarGame::togglePause();
         if (action == ACTION_LONG) {
           CarGame::stop();
           currentMode = MENU;
           menu_enter();
           break;
         }
-        if (action == ACTION_SINGLE && !CarGame::isRunning()) {
-          CarGame::start();
-        }
+        if (action == ACTION_SINGLE) CarGame::moveRight();
+        if (action == ACTION_DOUBLE) CarGame::moveLeft();
         CarGame::tick();
         screenSprite.pushSprite(0, 0);
         break;
       }
 
-    // *** ĐÃ SỬA LỖI Ở ĐÂY: XÓA DELAY ĐỂ HOẠT ẢNH CHẠY MƯỢT ***
+    // *** LOGIC VẼ ĐÃ ĐƯỢC CẬP NHẬT THEO KẾ HOẠCH ***
     case WATCH_MODE:
       {
         if (action == ACTION_LONG) {
@@ -318,8 +298,12 @@ void loop() {
           menu_enter();
           break;
         }
-        chronos_draw_watch_face();
-        // delay(1000); // Xóa dòng này
+        // Ưu tiên vẽ cảnh báo trước
+        bool alertDrawn = chronos_draw_alerts();
+        // Nếu không có cảnh báo nào, mới vẽ mặt đồng hồ
+        if (!alertDrawn) {
+          drawDigitalWatchFace();
+        }
         break;
       }
 
@@ -330,16 +314,17 @@ void loop() {
           menu_enter();
           break;
         }
-        drawAnalogWatchFace();
-        delay(1000);
+        bool alertDrawn = chronos_draw_alerts();
+        if (!alertDrawn) {
+          drawAnalogWatchFace();
+          delay(1000);  // Giữ delay để tiết kiệm pin cho mặt đồng hồ kim
+        }
         break;
       }
   }
 }
 
-// =======================================================================================
 // --- HÀM LOAD/SAVE SETTINGS ---
-// =======================================================================================
 void saveSettings() {
   Serial.println("Saving settings to SPIFFS...");
   File configFile = SPIFFS.open(CONFIG_FILE, "w");
@@ -460,7 +445,7 @@ void loadSettings() {
     setting_en["item5"] = "Marquee Speed";
     setting_en["item6"] = "Save";
     setting_en["item7"] = "Exit";
-    JsonObject mode_en = menu_en.createNestedObject("mode");
+    JsonObject mode_en = default_doc.createNestedObject("mode");
     mode_en["item0"] = "Play Flappy";
     mode_en["item1"] = "Play Car Game";
     mode_en["item2"] = "Watch (Digital)";
