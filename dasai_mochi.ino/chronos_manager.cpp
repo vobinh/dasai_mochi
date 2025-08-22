@@ -9,16 +9,27 @@ static TFT_eSprite* _sprite;
 static MakeFont* _font;
 static AppSettings* _settings;
 static ChronosESP32 Chronos("Mochi Watch");
+
+// --- BIẾN TRẠNG THÁI THÔNG BÁO & CHỈ ĐƯỜNG ---
 static Notification latestNotification;
+static Navigation latestNavigation; // *** KHÔI PHỤC BIẾN CHỈ ĐƯỜNG ***
 static String callerInfo;
 static bool hasNewNotification = false;
+static bool hasNewNavigation = false; // *** KHÔI PHỤC BIẾN TRẠNG THÁI CHỈ ĐƯỜNG ***
 static bool isConnected = false;
 static bool isRinging = false;
-static unsigned long notificationDisplayTime = 0;
+static unsigned long notificationStartTime = 0;
+static bool hasScrolledOnce = false;
+static unsigned long scrollFinishedTime = 0;
+static uint32_t nav_icon_crc = 0xFFFFFFFF; // *** KHÔI PHỤC BIẾN CRC ICON ***
+
+// Biến cho việc cuộn văn bản
 static std::vector<String> wrappedMessageLines;
 static int messageScrollLine = 0;
 static unsigned long lastMessageScrollTime = 0;
 static bool isNotificationScrolling = false;
+
+// Biến cho RTC
 static bool timeIsSynced = false;
 static uint8_t rtc_hour, rtc_minute, rtc_second, rtc_day, rtc_month;
 static uint16_t rtc_year;
@@ -56,7 +67,7 @@ static void getTimeFromRTC() {
 static void wrapMessage(String text) {
     wrappedMessageLines.clear();
     if (text.length() == 0) return;
-    const int maxWidth = _tft->width() - 40; // Thêm padding cho text
+    const int maxWidth = _tft->width() - 40;
     String currentLine = "";
     String currentWord = "";
     for (int i = 0; i < text.length(); i++) {
@@ -81,18 +92,44 @@ static void wrapMessage(String text) {
     wrappedMessageLines.push_back(currentLine);
 }
 
-
 // --- CÁC HÀM CALLBACK ---
 static void connectionCallback(bool state) { isConnected = state; if (state) syncTimeToRTC(); }
 static void ringerCallback(String caller, bool state) { callerInfo = caller; isRinging = state; }
 static void notificationCallback(Notification notification) {
     latestNotification = notification;
     hasNewNotification = true;
-    notificationDisplayTime = millis();
-    wrapMessage(latestNotification.message); 
-    messageScrollLine = 0; 
+    hasNewNavigation = false; // Đảm bảo tắt chỉ đường khi có tin nhắn mới
+    wrapMessage(latestNotification.title + "\n" + latestNotification.message); 
+    
+    notificationStartTime = millis();
     lastMessageScrollTime = millis();
-    isNotificationScrolling = (wrappedMessageLines.size() > 7); // 7 dòng tối đa
+    messageScrollLine = 0; 
+    hasScrolledOnce = false;
+    scrollFinishedTime = 0;
+    isNotificationScrolling = (wrappedMessageLines.size() > 7);
+}
+
+// *** KHÔI PHỤC HÀM CALLBACK CHO CẤU HÌNH (ĐỂ NHẬN DỮ LIỆU CHỈ ĐƯỜNG) ***
+static void configCallback(Config config, uint32_t a, uint32_t b) {
+    if (config == CF_NAV_DATA) {
+        if (a) { 
+            latestNavigation = Chronos.getNavigation();
+            hasNewNavigation = true;
+            hasNewNotification = false; 
+        } else {
+            hasNewNavigation = false;
+        }
+    }
+    if (config == CF_NAV_ICON) {
+        if (a == 2) { 
+            Navigation tempNav = Chronos.getNavigation();
+            if (nav_icon_crc != tempNav.iconCRC) {
+                nav_icon_crc = tempNav.iconCRC;
+                latestNavigation = tempNav; 
+                hasNewNavigation = true;
+            }
+        }
+    }
 }
 
 // --- CÁC HÀM CÔNG KHAI ---
@@ -101,6 +138,7 @@ void chronos_init(TFT_eSPI* tft, TFT_eSprite* sprite, MakeFont* font, AppSetting
     Chronos.setConnectionCallback(connectionCallback);
     Chronos.setNotificationCallback(notificationCallback);
     Chronos.setRingerCallback(ringerCallback); 
+    Chronos.setConfigurationCallback(configCallback); // *** KHÔI PHỤC LẠI VIỆC SET CALLBACK ***
     Chronos.begin(); 
 }
 
@@ -109,7 +147,6 @@ void chronos_loop() {
     getTimeFromRTC();
 }
 
-// *** HÀM ĐÃ ĐƯỢC TÁI CẤU TRÚC HOÀN TOÀN ***
 bool chronos_draw_alerts() {
     if (isRinging) {
         _sprite->fillSprite(TFT_BLACK);
@@ -118,34 +155,85 @@ bool chronos_draw_alerts() {
         _sprite->fillCircle(_tft->width() / 4, _tft->height() - 50, 30, TFT_GREEN);
         _sprite->fillCircle(_tft->width() * 3 / 4, _tft->height() - 50, 30, TFT_RED);
         _sprite->pushSprite(0, 0);
-        return true; // Có cảnh báo đang hiển thị
+        return true;
     }
 
-    if (hasNewNotification) {
-        if (millis() - notificationDisplayTime > _settings->notificationTimeout * 1000) {
-            hasNewNotification = false;
-            return false; // Hết thời gian, không còn cảnh báo
-        }
+    // *** KHÔI PHỤC LẠI KHỐI LOGIC HIỂN THỊ CHỈ ĐƯỜNG ***
+    if (hasNewNavigation) {
+        Serial.println(latestNavigation.directions);
+        Serial.println(latestNavigation.eta);
+        Serial.println(latestNavigation.duration);
+        Serial.println(latestNavigation.distance);
+        Serial.println(latestNavigation.title);
+        Serial.println(latestNavigation.speed);
 
-        // *** KHÔI PHỤC LẠI GIAO DIỆN TIN NHẮN ĐẦY ĐỦ ***
         _sprite->fillSprite(TFT_BLACK);
-        const int boxX = 5, boxY = 10, boxW = 230, boxH = 200, cornerRadius = 10;
-        const int textPadding = 8;
-        const int lineHeight = 22;
-        _sprite->drawRoundRect(boxX, boxY, boxW, boxH, cornerRadius, TFT_CYAN);
-        String appName = latestNotification.app;
-        _font->print(_tft->width() - _font->getLength(appName) - 15, _tft->height() - 30, appName, TFT_CYAN, TFT_BLACK);
-        
-        int maxLines = (boxH - textPadding * 2) / lineHeight;
-        if (isNotificationScrolling) {
-            if (millis() - lastMessageScrollTime > 1500) {
-                lastMessageScrollTime = millis();
-                messageScrollLine++;
-                if (messageScrollLine > wrappedMessageLines.size() - maxLines) {
-                    messageScrollLine = 0; // Quay lại từ đầu
+        if (nav_icon_crc != 0xFFFFFFFF) {
+            int iconSize = 96;
+            int pixelSize = iconSize / 48;
+            for (int y = 0; y < 48; y++) {
+                for (int x = 0; x < 48; x++) {
+                    int byte_index = (y * 48 + x) / 8;
+                    int bit_pos = 7 - (x % 8);
+                    bool px_on = (latestNavigation.icon[byte_index] >> bit_pos) & 0x01;
+                    if (px_on) {
+                        _sprite->fillRect(10 + x * pixelSize, 10 + y * pixelSize, pixelSize, pixelSize, TFT_WHITE);
+                    }
                 }
             }
         }
+        _font->print(15, 120, latestNavigation.title, TFT_WHITE, TFT_BLACK);
+        _font->print(15, 160, latestNavigation.directions, TFT_WHITE, TFT_BLACK);
+        String footer = String(latestNavigation.distance) + " - " + String(latestNavigation.eta);
+        _font->print((_tft->width() - _font->getLength(footer)) / 2, _tft->height() - 30, footer, TFT_WHITE, TFT_BLACK);
+        _sprite->pushSprite(0, 0);
+        return true;
+    }
+
+    if (hasNewNotification) {
+        bool shouldHide = false;
+        const int MAX_DISPLAY_TIME = 10000;
+
+        if (millis() - notificationStartTime > MAX_DISPLAY_TIME) {
+            shouldHide = true;
+        }
+
+        int maxLines = 7;
+        if (isNotificationScrolling) {
+            if (!hasScrolledOnce) {
+                if (millis() - lastMessageScrollTime > 1500) {
+                    lastMessageScrollTime = millis();
+                    messageScrollLine++;
+                    if (messageScrollLine > wrappedMessageLines.size() - maxLines) {
+                        hasScrolledOnce = true;
+                        scrollFinishedTime = millis();
+                        messageScrollLine = 0;
+                    }
+                }
+            } else {
+                if (millis() - scrollFinishedTime > _settings->notificationTimeout * 1000) {
+                    shouldHide = true;
+                }
+            }
+        } else {
+            if (millis() - notificationStartTime > _settings->notificationTimeout * 1000) {
+                shouldHide = true;
+            }
+        }
+
+        if (shouldHide) {
+            hasNewNotification = false;
+            return false;
+        }
+
+        _sprite->fillSprite(TFT_BLACK);
+        const int boxX = 5, boxY = 10, boxW = 230, boxH = 200, cornerRadius = 10;
+        const int textPadding = 8, scrollbarWidth = 6;
+        const int lineHeight = 22;
+        
+        _sprite->drawRoundRect(boxX, boxY, boxW, boxH, cornerRadius, TFT_CYAN);
+        String appName = latestNotification.app;
+        _font->print(_tft->width() - _font->getLength(appName) - 15, _tft->height() - 30, appName, TFT_CYAN, TFT_BLACK);
         
         for (int i = 0; i < maxLines; i++) {
             int lineIndex = messageScrollLine + i;
@@ -153,11 +241,22 @@ bool chronos_draw_alerts() {
                 _font->print(boxX + textPadding, boxY + textPadding + i * lineHeight, wrappedMessageLines[lineIndex], TFT_WHITE, TFT_BLACK);
             }
         }
+
+        if (isNotificationScrolling) {
+            int menuHeight = boxH - 10;
+            int scrollbarX = boxX + boxW - scrollbarWidth - 5;
+            _sprite->drawRect(scrollbarX, boxY + 5, scrollbarWidth, menuHeight, TFT_DARKGREY);
+            
+            float thumbHeight = (float)maxLines / wrappedMessageLines.size() * menuHeight;
+            float thumbY = boxY + 5 + ((float)messageScrollLine / wrappedMessageLines.size() * menuHeight);
+            _sprite->fillRoundRect(scrollbarX, thumbY, scrollbarWidth, thumbHeight, 2, TFT_WHITE);
+        }
+
         _sprite->pushSprite(0, 0);
-        return true; // Có cảnh báo đang hiển thị
+        return true;
     }
 
-    return false; // Không có cảnh báo nào
+    return false;
 }
 
 // --- CÁC HÀM GETTER ---

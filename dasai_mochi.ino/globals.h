@@ -30,6 +30,7 @@ struct AppSettings {
   bool useSD;
   int notificationTimeout;
   int marqueeSpeed; // *** BIẾN MỚI ĐỂ LƯU TỐC ĐỘ CHỮ CHẠY ***
+  int currentAnalogFaceIndex; // *** BIẾN MỚI ĐỂ LƯU MẶT ĐỒNG HỒ KIM ĐÃ CHỌN ***
 };
 
 #endif

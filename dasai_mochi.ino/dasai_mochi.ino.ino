@@ -10,17 +10,18 @@
 
 #include "globals.h"
 #include "menu_manager.h"
+#include "button_manager.h"
 #include "flappy_game.h"
 #include "car_game.h"
-#include "background_image.h"
 #include "hour_hand.h"
 #include "minute_hand.h"
 #include "second_hand.h"
 #include "chronos_manager.h"
+#include "ui_effects.h"
+#include "analog_face.h"
 #include "DigitaltsLime35pt7b.h"
 
 // --- CẤU HÌNH ---
-#define BUTTON_PIN 0
 #define VIDEO_JUMP_TARGET 2
 #define CONFIG_FILE "/config.json"
 #define SD_CS_PIN 7
@@ -37,8 +38,10 @@ MakeFont myfont(&setSpritePixel);
 
 Mode currentMode = PLAYING;
 AppSettings settings;
+Mode modeBeforeAlert = PLAYING;
+bool isDisplayingAlert = false;
 
-// --- BIẾN CHO VIDEO ---
+// --- BIẾN CHO VIDEO & MẶT ĐỒNG HỒ ---
 typedef struct _VideoInfo {
   const uint8_t* const* frames;
   const uint16_t* frames_size;
@@ -53,12 +56,35 @@ const uint8_t NUM_FLASH_VIDEOS = sizeof(flashVideoList) / sizeof(flashVideoList[
 uint8_t currentVideoIndex = 0;
 uint16_t currentFrame = 0;
 
+VideoInfo analogFaces = { analog_face_frames, analog_face_frames_size, analog_face_num_frames };
+
 // --- KHAI BÁO HÀM ---
 void saveSettings();
 void loadSettings();
 void drawDigitalWatchFace();
+void drawAnalogWatchFace();
 
-// --- CÁC HÀM TIỆN ÍCH ---
+// =======================================================================================
+// --- CÁC HÀM TIỆN ÍCH VÀ CALLBACK CHO VIỆC VẼ ---
+// =======================================================================================
+
+// Con trỏ toàn cục để trỏ đến sprite mục tiêu khi vẽ JPEG
+TFT_eSprite* jpegSpriteTarget = nullptr;
+
+// Callback để vẽ JPEG trực tiếp lên màn hình (cho video)
+bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
+  if (x >= tft.width() || y >= tft.height()) return false;
+  tft.pushImage(x, y, w, h, bitmap);
+  return true;
+}
+
+// Callback mới để vẽ JPEG lên một sprite (cho mặt đồng hồ)
+bool sprite_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
+  if (!jpegSpriteTarget) return false;  // An toàn nếu con trỏ chưa được thiết lập
+  jpegSpriteTarget->pushImage(x, y, w, h, bitmap);
+  return true;
+}
+
 void setSpritePixel(int16_t x, int16_t y, uint16_t color) {
   screenSprite.drawPixel(x, y, color);
 }
@@ -78,57 +104,11 @@ void handleSerialCommands() {
   }
 }
 
-ButtonAction getButtonAction() {
-  static int lastState = HIGH, currentState;
-  static unsigned long lastDebounceTime = 0, lastClickTime = 0, pressTime = 0;
-  static int clickCount = 0;
-  ButtonAction action = ACTION_NONE;
-  int reading = digitalRead(BUTTON_PIN);
-  if (reading != lastState) { lastDebounceTime = millis(); }
-  if ((millis() - lastDebounceTime) > 50) {
-    if (reading != currentState) {
-      currentState = reading;
-      if (currentState == LOW) {
-        clickCount++;
-        pressTime = millis();
-      } else {
-        lastClickTime = millis();
-      }
-    }
-  }
-  if (currentState == LOW && (millis() - pressTime > 1000)) {
-    if (clickCount > 0) {
-      action = ACTION_LONG;
-      clickCount = 0;
-    }
-  }
-  if (clickCount > 0 && currentState == HIGH && (millis() - lastClickTime > 400)) {
-    if (clickCount == 1) action = ACTION_SINGLE;
-    if (clickCount == 2) action = ACTION_DOUBLE;
-    if (clickCount == 3) action = ACTION_TRIPLE;
-    clickCount = 0;
-  }
-  lastState = reading;
-  return action;
-}
-
-bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
-  if (x >= tft.width() || y >= tft.height()) return false;
-  tft.pushImage(x, y, w, h, bitmap);
-  return true;
-}
-
-void drawJPEGFrame(const VideoInfo* video, uint16_t frameIndex) {
-  const uint8_t* jpg_data = (const uint8_t*)pgm_read_ptr(&video->frames[frameIndex]);
-  uint16_t jpg_size = pgm_read_word(&video->frames_size[frameIndex]);
-  TJpgDec.drawJpg(0, 0, jpg_data, jpg_size);
-}
-
-// --- CÁC HÀM VẼ MẶT ĐỒNG HỒ (ĐÃ ĐƯỢC DI CHUYỂN RA NGOÀI) ---
+// =======================================================================================
+// --- CÁC HÀM VẼ MẶT ĐỒNG HỒ ---
+// =======================================================================================
 void drawDigitalWatchFace() {
-  screenSprite.fillSprite(TFT_BLACK);
-  // Hiệu ứng mưa số...
-  // (Logic hiệu ứng mưa số sẽ được thêm vào đây nếu cần)
+  drawMatrixRainBackground(&tft, &screenSprite);
 
   if (!chronos_is_time_synced()) {
     String msg = "Dang ket noi...";
@@ -151,8 +131,28 @@ void drawDigitalWatchFace() {
   screenSprite.pushSprite(0, 0);
 }
 
+// *** HÀM ĐÃ ĐƯỢC SỬA LỖI HOÀN TOÀN ***
 void drawAnalogWatchFace() {
-  screenSprite.pushImage(0, 0, 240, 240, backgroundImage);
+  if (analogFaces.num_frames == 0 || settings.currentAnalogFaceIndex >= analogFaces.num_frames) {
+    screenSprite.fillSprite(TFT_BLACK);
+    myfont.print(10, 10, "No analog faces", TFT_RED, TFT_BLACK);
+    screenSprite.pushSprite(0, 0);
+    return;
+  }
+
+  // 1. Thiết lập để TJpgDec vẽ vào sprite của chúng ta
+  jpegSpriteTarget = &screenSprite;
+  TJpgDec.setCallback(sprite_output);
+
+  // 2. Lấy dữ liệu và vẽ hình nền JPEG trực tiếp lên sprite
+  const uint8_t* jpg_data = (const uint8_t*)pgm_read_ptr(&analogFaces.frames[settings.currentAnalogFaceIndex]);
+  uint16_t jpg_size = pgm_read_word(&analogFaces.frames_size[settings.currentAnalogFaceIndex]);
+  TJpgDec.drawJpg(0, 0, jpg_data, jpg_size);
+
+  // 3. QUAN TRỌNG: Trả callback về mặc định để không làm hỏng chức năng video
+  TJpgDec.setCallback(tft_output);
+
+  // 4. Vẽ kim đồng hồ và các thông tin khác LÊN TRÊN hình nền đã có trong sprite
   if (chronos_is_time_synced()) {
     char dateStr[10];
     sprintf(dateStr, "%02d/%02d", chronos_get_day(), chronos_get_month());
@@ -167,6 +167,8 @@ void drawAnalogWatchFace() {
   } else {
     myfont.print((tft.width() - myfont.getLength("--:--")) / 2, tft.height() / 2 - 10, "--:--", TFT_WHITE, TFT_BLACK);
   }
+
+  // 5. Đẩy sprite đã hoàn chỉnh ra màn hình
   screenSprite.pushSprite(0, 0);
 }
 
@@ -178,12 +180,14 @@ void setup() {
   tft.begin();
   screenSprite.createSprite(tft.width(), tft.height());
   myfont.set_font(Fira_Code_16);
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
+
+  button_init();
 
   menu_init(&tft, &screenSprite, &myfont, &settings);
   chronos_init(&tft, &screenSprite, &myfont, &settings);
   Flappy::begin(&screenSprite);
   CarGame::begin(&screenSprite);
+  initMatrixRain(&tft);
 
   loadSettings();
 
@@ -192,7 +196,7 @@ void setup() {
 
   TJpgDec.setJpgScale(1);
   TJpgDec.setSwapBytes(true);
-  TJpgDec.setCallback(tft_output);
+  TJpgDec.setCallback(tft_output);  // Thiết lập callback mặc định
 
   hourHandSprite.createSprite(HOUR_HAND_WIDTH, HOUR_HAND_HEIGHT);
   hourHandSprite.setPivot(HOUR_PIVOT_X, HOUR_PIVOT_Y);
@@ -212,11 +216,16 @@ void loop() {
   chronos_loop();
   ButtonAction action = getButtonAction();
 
-  // --- BỘ KIỂM TRA ƯU TIÊN ---
-  if (chronos_is_ringing() && currentMode != MENU) {
-    currentMode = WATCH_MODE;
-  } else if (chronos_has_new_notification() && currentMode != MENU && currentMode != GAME_FLAPPY && currentMode != GAME_CAR) {
-    currentMode = WATCH_MODE;
+  bool isAlertEvent = chronos_is_ringing() || chronos_has_new_notification();
+
+  if (isAlertEvent && !isDisplayingAlert) {
+    if (currentMode != MENU) {
+      modeBeforeAlert = currentMode;
+      if (currentMode != WATCH_MODE && currentMode != ANALOG_WATCH_MODE) {
+        currentMode = WATCH_MODE;
+      }
+      isDisplayingAlert = true;
+    }
   }
 
   switch (currentMode) {
@@ -236,7 +245,12 @@ void loop() {
         }
 
         VideoInfo* currentVideo = flashVideoList[currentVideoIndex];
-        drawJPEGFrame(currentVideo, currentFrame);
+        // Vẽ video trực tiếp lên màn hình
+        TJpgDec.setCallback(tft_output);
+        const uint8_t* jpg_data = (const uint8_t*)pgm_read_ptr(&currentVideo->frames[currentFrame]);
+        uint16_t jpg_size = pgm_read_word(&currentVideo->frames_size[currentFrame]);
+        TJpgDec.drawJpg(0, 0, jpg_data, jpg_size);
+
         delay(settings.frameDelay);
         currentFrame = (currentFrame + 1) % currentVideo->num_frames;
         break;
@@ -269,7 +283,19 @@ void loop() {
           menu_enter();
           break;
         }
-        if (digitalRead(BUTTON_PIN) == LOW) Flappy::flap();
+
+        static unsigned long lastFlapTime = 0;
+        if (is_button_held() && Flappy::isRunning() && !Flappy::isPaused()) {
+          if (millis() - lastFlapTime > 120) {
+            Flappy::flap();
+            lastFlapTime = millis();
+          }
+        }
+
+        if (action == ACTION_SINGLE && !Flappy::isRunning()) {
+          Flappy::start();
+        }
+
         Flappy::tick();
         screenSprite.pushSprite(0, 0);
         break;
@@ -290,34 +316,42 @@ void loop() {
         break;
       }
 
-    // *** LOGIC VẼ ĐÃ ĐƯỢC CẬP NHẬT THEO KẾ HOẠCH ***
     case WATCH_MODE:
-      {
-        if (action == ACTION_LONG) {
-          currentMode = MENU;
-          menu_enter();
-          break;
-        }
-        // Ưu tiên vẽ cảnh báo trước
-        bool alertDrawn = chronos_draw_alerts();
-        // Nếu không có cảnh báo nào, mới vẽ mặt đồng hồ
-        if (!alertDrawn) {
-          drawDigitalWatchFace();
-        }
-        break;
-      }
-
     case ANALOG_WATCH_MODE:
       {
+        static unsigned long lastAnalogUpdate = 0;
+
+        if (currentMode == ANALOG_WATCH_MODE && action == ACTION_DOUBLE) {
+          if (analogFaces.num_frames > 0) {
+            settings.currentAnalogFaceIndex = (settings.currentAnalogFaceIndex + 1) % analogFaces.num_frames;
+            saveSettings();
+          }
+        }
+
         if (action == ACTION_LONG) {
+          isDisplayingAlert = false;
           currentMode = MENU;
           menu_enter();
           break;
         }
+
         bool alertDrawn = chronos_draw_alerts();
+
         if (!alertDrawn) {
-          drawAnalogWatchFace();
-          delay(1000);  // Giữ delay để tiết kiệm pin cho mặt đồng hồ kim
+          if (isDisplayingAlert) {
+            isDisplayingAlert = false;
+            currentMode = modeBeforeAlert;
+            break;
+          }
+
+          if (currentMode == WATCH_MODE) {
+            drawDigitalWatchFace();
+          } else {
+            if (millis() - lastAnalogUpdate > 1000) {
+              lastAnalogUpdate = millis();
+              drawAnalogWatchFace();
+            }
+          }
         }
         break;
       }
@@ -337,6 +371,7 @@ void saveSettings() {
   doc["useSD"] = settings.useSD;
   doc["notificationTimeout"] = settings.notificationTimeout;
   doc["marqueeSpeed"] = settings.marqueeSpeed;
+  doc["currentAnalogFaceIndex"] = settings.currentAnalogFaceIndex;
 
   JsonObject menu_vi = doc.createNestedObject("menu_vi");
   menu_vi["tab_setting"] = "Cài đặt";
@@ -398,6 +433,7 @@ void loadSettings() {
       settings.useSD = doc["useSD"] | false;
       settings.notificationTimeout = doc["notificationTimeout"] | 5;
       settings.marqueeSpeed = doc["marqueeSpeed"] | 35;
+      settings.currentAnalogFaceIndex = doc["currentAnalogFaceIndex"] | 0;
       menu_load_strings(doc.as<JsonObject>());
       success = true;
     }
@@ -412,12 +448,13 @@ void loadSettings() {
     settings.useSD = false;
     settings.notificationTimeout = 5;
     settings.marqueeSpeed = 35;
+    settings.currentAnalogFaceIndex = 0;
 
     StaticJsonDocument<1024> default_doc;
     JsonObject menu_vi = default_doc.createNestedObject("menu_vi");
     menu_vi["tab_setting"] = "Cài đặt";
     menu_vi["tab_mode"] = "Chế độ";
-    JsonObject setting_vi = menu_vi.createNestedObject("setting");
+    JsonObject setting_vi = default_doc.createNestedObject("setting");
     setting_vi["item0"] = "Tốc độ video";
     setting_vi["item1"] = "Xoay màn hình";
     setting_vi["item2"] = "Ngôn ngữ";
