@@ -8,7 +8,8 @@
  * @brief Vẽ văn bản với hiệu ứng chạy chữ nếu nó quá dài và đang được chọn.
  * @param speed_ms Thời gian (mili giây) giữa mỗi lần cập nhật vị trí, số nhỏ hơn = nhanh hơn.
  */
-void drawMarqueeText(TFT_eSprite* sprite, MakeFont* font, String text, int16_t x, int16_t y, int16_t width, uint16_t textColor, uint16_t bgColor, bool isSelected, uint32_t speed_ms) {
+// *** ĐÃ SỬA LỖI: Thêm từ khóa "inline" để tránh lỗi "multiple definition" ***
+inline void drawMarqueeText(TFT_eSprite* sprite, MakeFont* font, String text, int16_t x, int16_t y, int16_t width, uint16_t textColor, uint16_t bgColor, bool isSelected, uint32_t speed_ms) {
     static int16_t scroll_x = 0;
     static uint32_t last_scroll_time = 0;
     static String currently_selected_text = "";
@@ -40,7 +41,6 @@ void drawMarqueeText(TFT_eSprite* sprite, MakeFont* font, String text, int16_t x
         last_scroll_time = millis();
     }
 
-    // *** SỬ DỤNG BIẾN TỐC ĐỘ MỚI ***
     if (millis() - last_scroll_time > speed_ms) {
         last_scroll_time = millis();
         scroll_x++;

@@ -8,8 +8,6 @@
 void chronos_init(TFT_eSPI* tft, TFT_eSprite* sprite, MakeFont* font, AppSettings* settings);
 void chronos_loop();
 
-// *** HÀM ĐÃ ĐƯỢC ĐỔI TÊN VÀ KIỂU TRẢ VỀ ***
-// Trả về 'true' nếu có một cảnh báo đang được hiển thị.
 bool chronos_draw_alerts();
 
 // --- CÁC HÀM GETTER ĐỂ LẤY THÔNG TIN ---
@@ -22,5 +20,6 @@ uint8_t chronos_get_month();
 uint16_t chronos_get_year();
 bool chronos_is_ringing();
 bool chronos_has_new_notification();
+bool chronos_has_new_navigation(); // *** HÀM MỚI ĐỂ KIỂM TRA CHỈ ĐƯỜNG ***
 
 #endif

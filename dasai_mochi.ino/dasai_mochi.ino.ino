@@ -216,7 +216,7 @@ void loop() {
   chronos_loop();
   ButtonAction action = getButtonAction();
 
-  bool isAlertEvent = chronos_is_ringing() || chronos_has_new_notification();
+  bool isAlertEvent = chronos_is_ringing() || chronos_has_new_notification() || chronos_has_new_navigation();
 
   if (isAlertEvent && !isDisplayingAlert) {
     if (currentMode != MENU) {

@@ -2,6 +2,7 @@
 #include <ChronosESP32.h>
 #include <vector>
 #include <time.h>
+#include "ui_utils.h" // Cần thiết cho hàm drawMarqueeText
 
 // --- CÁC BIẾN TĨNH ---
 static TFT_eSPI* _tft;
@@ -12,16 +13,20 @@ static ChronosESP32 Chronos("Mochi Watch");
 
 // --- BIẾN TRẠNG THÁI THÔNG BÁO & CHỈ ĐƯỜNG ---
 static Notification latestNotification;
-static Navigation latestNavigation; // *** KHÔI PHỤC BIẾN CHỈ ĐƯỜNG ***
+static Navigation latestNavigation;
 static String callerInfo;
 static bool hasNewNotification = false;
-static bool hasNewNavigation = false; // *** KHÔI PHỤC BIẾN TRẠNG THÁI CHỈ ĐƯỜNG ***
+static bool hasNewNavigation = false;
 static bool isConnected = false;
 static bool isRinging = false;
 static unsigned long notificationStartTime = 0;
 static bool hasScrolledOnce = false;
 static unsigned long scrollFinishedTime = 0;
-static uint32_t nav_icon_crc = 0xFFFFFFFF; // *** KHÔI PHỤC BIẾN CRC ICON ***
+static uint32_t nav_icon_crc = 0xFFFFFFFF;
+
+// Các biến cho hiệu ứng nhấp nháy
+static bool navIconVisible = true;
+static unsigned long lastNavIconBlinkTime = 0;
 
 // Biến cho việc cuộn văn bản
 static std::vector<String> wrappedMessageLines;
@@ -98,7 +103,7 @@ static void ringerCallback(String caller, bool state) { callerInfo = caller; isR
 static void notificationCallback(Notification notification) {
     latestNotification = notification;
     hasNewNotification = true;
-    hasNewNavigation = false; // Đảm bảo tắt chỉ đường khi có tin nhắn mới
+    hasNewNavigation = false; 
     wrapMessage(latestNotification.title + "\n" + latestNotification.message); 
     
     notificationStartTime = millis();
@@ -109,7 +114,6 @@ static void notificationCallback(Notification notification) {
     isNotificationScrolling = (wrappedMessageLines.size() > 7);
 }
 
-// *** KHÔI PHỤC HÀM CALLBACK CHO CẤU HÌNH (ĐỂ NHẬN DỮ LIỆU CHỈ ĐƯỜNG) ***
 static void configCallback(Config config, uint32_t a, uint32_t b) {
     if (config == CF_NAV_DATA) {
         if (a) { 
@@ -138,7 +142,7 @@ void chronos_init(TFT_eSPI* tft, TFT_eSprite* sprite, MakeFont* font, AppSetting
     Chronos.setConnectionCallback(connectionCallback);
     Chronos.setNotificationCallback(notificationCallback);
     Chronos.setRingerCallback(ringerCallback); 
-    Chronos.setConfigurationCallback(configCallback); // *** KHÔI PHỤC LẠI VIỆC SET CALLBACK ***
+    Chronos.setConfigurationCallback(configCallback);
     Chronos.begin(); 
 }
 
@@ -158,17 +162,39 @@ bool chronos_draw_alerts() {
         return true;
     }
 
-    // *** KHÔI PHỤC LẠI KHỐI LOGIC HIỂN THỊ CHỈ ĐƯỜNG ***
     if (hasNewNavigation) {
-        Serial.println(latestNavigation.directions);
-        Serial.println(latestNavigation.eta);
-        Serial.println(latestNavigation.duration);
-        Serial.println(latestNavigation.distance);
-        Serial.println(latestNavigation.title);
-        Serial.println(latestNavigation.speed);
-
         _sprite->fillSprite(TFT_BLACK);
-        if (nav_icon_crc != 0xFFFFFFFF) {
+
+        // *** LOGIC XỬ LÝ KHOẢNG CÁCH ĐÃ ĐƯỢC CẢI TIẾN ***
+        float distanceInMeters = 0;
+        String distStr = latestNavigation.title;
+        distStr.trim();
+        distStr.replace(",", "."); // Xử lý trường hợp dấu phẩy thập phân
+        if (distStr.indexOf("k") > -1) { // Kiểm tra linh hoạt hơn
+            distanceInMeters = distStr.toFloat() * 1000;
+        } else {
+            distanceInMeters = distStr.toFloat();
+        }
+        uint16_t iconColor = TFT_WHITE;
+        bool shouldBlink = false;
+        // Thêm điều kiện > 0 để tránh nhấp nháy khi khoảng cách là 0 hoặc không hợp lệ
+        if (distanceInMeters > 0 && distanceInMeters < 100) {
+            iconColor = TFT_RED;
+            shouldBlink = true;
+        } else if (distanceInMeters > 0 && distanceInMeters < 150) {
+            shouldBlink = true;
+        }
+
+        if (shouldBlink) {
+            if (millis() - lastNavIconBlinkTime > 500) {
+                lastNavIconBlinkTime = millis();
+                navIconVisible = !navIconVisible;
+            }
+        } else {
+            navIconVisible = true;
+        }
+
+        if (nav_icon_crc != 0xFFFFFFFF && navIconVisible) {
             int iconSize = 96;
             int pixelSize = iconSize / 48;
             for (int y = 0; y < 48; y++) {
@@ -177,13 +203,16 @@ bool chronos_draw_alerts() {
                     int bit_pos = 7 - (x % 8);
                     bool px_on = (latestNavigation.icon[byte_index] >> bit_pos) & 0x01;
                     if (px_on) {
-                        _sprite->fillRect(10 + x * pixelSize, 10 + y * pixelSize, pixelSize, pixelSize, TFT_WHITE);
+                        _sprite->fillRect(10 + x * pixelSize, 10 + y * pixelSize, pixelSize, pixelSize, iconColor);
                     }
                 }
             }
         }
+        
         _font->print(15, 120, latestNavigation.title, TFT_WHITE, TFT_BLACK);
-        _font->print(15, 160, latestNavigation.directions, TFT_WHITE, TFT_BLACK);
+        int marqueeWidth = _tft->width() - 30; 
+        drawMarqueeText(_sprite, _font, latestNavigation.directions, 15, 160, marqueeWidth, TFT_WHITE, TFT_BLACK, true, _settings->marqueeSpeed);
+        
         String footer = String(latestNavigation.distance) + " - " + String(latestNavigation.eta);
         _font->print((_tft->width() - _font->getLength(footer)) / 2, _tft->height() - 30, footer, TFT_WHITE, TFT_BLACK);
         _sprite->pushSprite(0, 0);
@@ -269,3 +298,4 @@ uint8_t chronos_get_month() { return rtc_month; }
 uint16_t chronos_get_year() { return rtc_year; }
 bool chronos_is_ringing() { return isRinging; }
 bool chronos_has_new_notification() { return hasNewNotification; }
+bool chronos_has_new_navigation() { return hasNewNavigation; }
