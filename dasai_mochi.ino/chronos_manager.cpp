@@ -5,10 +5,10 @@
 #include "ui_utils.h"
 
 // --- CÁC BIẾN TĨNH ---
-static TFT_eSPI* _tft;
-static TFT_eSprite* _sprite;
-static MakeFont* _font;
-static AppSettings* _settings;
+static TFT_eSPI *_tft;
+static TFT_eSprite *_sprite;
+static MakeFont *_font;
+static AppSettings *_settings;
 static ChronosESP32 Chronos("Mochi Watch");
 
 static Notification latestNotification;
@@ -37,8 +37,10 @@ static WeatherData latestWeather;
 static bool hasWeatherData = false;
 
 // --- CÁC HÀM NỘI BỘ ---
-static void syncTimeToRTC() {
-    if (!Chronos.isConnected()) return;
+static void syncTimeToRTC()
+{
+    if (!Chronos.isConnected())
+        return;
     struct tm timeinfo;
     timeinfo.tm_year = Chronos.getYear() - 1900;
     timeinfo.tm_mon = Chronos.getMonth() - 1;
@@ -47,13 +49,15 @@ static void syncTimeToRTC() {
     timeinfo.tm_min = Chronos.getMinute();
     timeinfo.tm_sec = Chronos.getSecond();
     time_t t = mktime(&timeinfo);
-    struct timeval now = { .tv_sec = t };
+    struct timeval now = {.tv_sec = t};
     settimeofday(&now, NULL);
     timeIsSynced = true;
 }
 
-static void getTimeFromRTC() {
-    if (!timeIsSynced) return;
+static void getTimeFromRTC()
+{
+    if (!timeIsSynced)
+        return;
     struct tm timeinfo;
     time_t now;
     time(&now);
@@ -66,27 +70,37 @@ static void getTimeFromRTC() {
     rtc_year = timeinfo.tm_year + 1900;
 }
 
-static void wrapMessage(String text) {
+static void wrapMessage(String text)
+{
     wrappedMessageLines.clear();
-    if (text.length() == 0) return;
+    if (text.length() == 0)
+        return;
     const int maxWidth = _tft->width() - 40;
     String currentLine = "";
     String currentWord = "";
-    for (int i = 0; i < text.length(); i++) {
+    for (int i = 0; i < text.length(); i++)
+    {
         char c = text.charAt(i);
-        if (c == ' ' || c == '\n') {
-            if (_font->getLength(currentLine + currentWord) > maxWidth) {
+        if (c == ' ' || c == '\n')
+        {
+            if (_font->getLength(currentLine + currentWord) > maxWidth)
+            {
                 wrappedMessageLines.push_back(currentLine);
                 currentLine = currentWord + " ";
-            } else {
+            }
+            else
+            {
                 currentLine += currentWord + " ";
             }
             currentWord = "";
-            if (c == '\n') {
+            if (c == '\n')
+            {
                 wrappedMessageLines.push_back(currentLine);
                 currentLine = "";
             }
-        } else {
+        }
+        else
+        {
             currentWord += c;
         }
     }
@@ -95,84 +109,110 @@ static void wrapMessage(String text) {
 }
 
 // --- CÁC HÀM CALLBACK ---
-static void connectionCallback(bool state) { isConnected = state; if (state) syncTimeToRTC(); }
-static void ringerCallback(String caller, bool state) { callerInfo = caller; isRinging = state; }
-static void notificationCallback(Notification notification) {
+static void connectionCallback(bool state)
+{
+    isConnected = state;
+    if (state)
+        syncTimeToRTC();
+}
+static void ringerCallback(String caller, bool state)
+{
+    callerInfo = caller;
+    isRinging = state;
+}
+static void notificationCallback(Notification notification)
+{
     latestNotification = notification;
     hasNewNotification = true;
-    hasNewNavigation = false; 
-    wrapMessage(latestNotification.title + "\n" + latestNotification.message); 
-    
+    hasNewNavigation = false;
+    wrapMessage(latestNotification.title + "\n" + latestNotification.message);
+
     notificationStartTime = millis();
     lastMessageScrollTime = millis();
-    messageScrollLine = 0; 
+    messageScrollLine = 0;
     hasScrolledOnce = false;
     scrollFinishedTime = 0;
     isNotificationScrolling = (wrappedMessageLines.size() > 7);
 }
 
-static void configCallback(Config config, uint32_t a, uint32_t b) {
-    switch(config) {
-        case CF_NAV_DATA:
-            if (a) { 
-                latestNavigation = Chronos.getNavigation();
+static void configCallback(Config config, uint32_t a, uint32_t b)
+{
+    switch (config)
+    {
+    case CF_NAV_DATA:
+        if (a)
+        {
+            latestNavigation = Chronos.getNavigation();
+            hasNewNavigation = true;
+            hasNewNotification = false;
+        }
+        else
+        {
+            hasNewNavigation = false;
+        }
+        break;
+    case CF_NAV_ICON:
+        if (a == 2)
+        {
+            Navigation tempNav = Chronos.getNavigation();
+            if (nav_icon_crc != tempNav.iconCRC)
+            {
+                nav_icon_crc = tempNav.iconCRC;
+                latestNavigation = tempNav;
                 hasNewNavigation = true;
-                hasNewNotification = false; 
-            } else {
-                hasNewNavigation = false;
             }
-            break;
-        case CF_NAV_ICON:
-            if (a == 2) { 
-                Navigation tempNav = Chronos.getNavigation();
-                if (nav_icon_crc != tempNav.iconCRC) {
-                    nav_icon_crc = tempNav.iconCRC;
-                    latestNavigation = tempNav; 
-                    hasNewNavigation = true;
-                }
-            }
-            break;
-        // *** THÊM LOGIC XỬ LÝ THỜI TIẾT ***
-        case CF_WEATHER:
-            Serial.println("Weather received");
-            if (a > 0) { // Có dữ liệu mới
-                Weather w = Chronos.getWeatherAt(0);
-                latestWeather.currentTemp = w.temp;
-                latestWeather.highTemp = w.high;
-                latestWeather.lowTemp = w.low;
-                latestWeather.icon = w.icon;
-                latestWeather.pressure = w.pressure;
-                latestWeather.uv = w.uv;
+        }
+        break;
+    // *** THÊM LOGIC XỬ LÝ THỜI TIẾT ***
+    case CF_WEATHER:
+        Serial.println("Weather received");
+        if (a > 0)
+        { // Có dữ liệu mới
+            Weather w = Chronos.getWeatherAt(0);
+            latestWeather.currentTemp = w.temp;
+            latestWeather.highTemp = w.high;
+            latestWeather.lowTemp = w.low;
+            latestWeather.icon = w.icon;
+            latestWeather.pressure = w.pressure;
+            latestWeather.uv = w.uv;
 
-                hasWeatherData = true;
-            }
-            if (b) { // Có tên thành phố
-                String city = Chronos.getWeatherCity();
-                latestWeather.city = city;
-            }
-            break;
-        default:
-            break;
+            hasWeatherData = true;
+        }
+        if (b)
+        { // Có tên thành phố
+            String city = Chronos.getWeatherCity();
+            latestWeather.city = city;
+        }
+        break;
+    default:
+        break;
     }
 }
 
 // --- CÁC HÀM CÔNG KHAI ---
-void chronos_init(TFT_eSPI* tft, TFT_eSprite* sprite, MakeFont* font, AppSettings* settings) {
-    _tft = tft; _sprite = sprite; _font = font; _settings = settings;
+void chronos_init(TFT_eSPI *tft, TFT_eSprite *sprite, MakeFont *font, AppSettings *settings)
+{
+    _tft = tft;
+    _sprite = sprite;
+    _font = font;
+    _settings = settings;
     Chronos.setConnectionCallback(connectionCallback);
     Chronos.setNotificationCallback(notificationCallback);
-    Chronos.setRingerCallback(ringerCallback); 
+    Chronos.setRingerCallback(ringerCallback);
     Chronos.setConfigurationCallback(configCallback);
-    Chronos.begin(); 
+    Chronos.begin();
 }
 
-void chronos_loop() {
+void chronos_loop()
+{
     Chronos.loop();
     getTimeFromRTC();
 }
 
-bool chronos_draw_alerts() {
-    if (isRinging) {
+bool chronos_draw_alerts()
+{
+    if (isRinging)
+    {
         _sprite->fillSprite(TFT_BLACK);
         _font->print((_tft->width() - _font->getLength("CUỘC GỌI ĐẾN")) / 2, 30, "CUỘC GỌI ĐẾN", TFT_WHITE, TFT_BLACK);
         _font->print((_tft->width() - _font->getLength(callerInfo)) / 2, _tft->height() / 2, callerInfo, TFT_WHITE, TFT_BLACK);
@@ -182,64 +222,156 @@ bool chronos_draw_alerts() {
         return true;
     }
 
-    if (hasNewNavigation) {
+    if (hasNewNavigation)
+    {
         _sprite->fillSprite(TFT_BLACK);
         float distanceInMeters = 0;
         String distStr = latestNavigation.title;
         distStr.trim();
         distStr.replace(",", ".");
 
-        if (distStr.indexOf("k") > -1) {
+        if (distStr.indexOf("k") > -1)
+        {
             distanceInMeters = distStr.toFloat() * 1000;
-        } else {
+        }
+        else
+        {
             distanceInMeters = distStr.toFloat();
         }
 
         uint16_t iconColor = TFT_WHITE;
         bool shouldBlink = false;
-        if (distanceInMeters > 0 && distanceInMeters < 50) {
+        if (distanceInMeters > 0 && distanceInMeters < 50)
+        {
             iconColor = TFT_RED;
             shouldBlink = true;
-        } else if (distanceInMeters > 0 && distanceInMeters < 100) {
+        }
+        else if (distanceInMeters > 0 && distanceInMeters < 100)
+        {
             shouldBlink = true;
         }
 
-        if (shouldBlink) {
-            if (millis() - lastNavIconBlinkTime > 500) {
+        if (shouldBlink)
+        {
+            if (millis() - lastNavIconBlinkTime > 500)
+            {
                 lastNavIconBlinkTime = millis();
                 navIconVisible = !navIconVisible;
             }
-        } else {
+        }
+        else
+        {
             navIconVisible = true;
         }
 
-        if (nav_icon_crc != 0xFFFFFFFF && navIconVisible) {
+        if (nav_icon_crc != 0xFFFFFFFF && navIconVisible)
+        {
             int iconSize = 96;
             int pixelSize = iconSize / 48;
-            for (int y = 0; y < 48; y++) {
-                for (int x = 0; x < 48; x++) {
+            for (int y = 0; y < 48; y++)
+            {
+                for (int x = 0; x < 48; x++)
+                {
                     int byte_index = (y * 48 + x) / 8;
                     int bit_pos = 7 - (x % 8);
                     bool px_on = (latestNavigation.icon[byte_index] >> bit_pos) & 0x01;
-                    if (px_on) {
+                    if (px_on)
+                    {
                         _sprite->fillRect(10 + x * pixelSize, 10 + y * pixelSize, pixelSize, pixelSize, iconColor);
                     }
                 }
             }
         }
-        
+
         _font->print(15, 120, latestNavigation.title, TFT_WHITE, TFT_BLACK);
-        int marqueeWidth = _tft->width() - 30; 
+        int marqueeWidth = _tft->width() - 30;
         drawMarqueeText(_sprite, _font, latestNavigation.directions, 15, 160, marqueeWidth, TFT_WHITE, TFT_BLACK, true, _settings->marqueeSpeed);
-        
+
         String footer = String(latestNavigation.distance) + " - " + String(latestNavigation.eta);
         _font->print((_tft->width() - _font->getLength(footer)) / 2, _tft->height() - 30, footer, TFT_WHITE, TFT_BLACK);
         _sprite->pushSprite(0, 0);
         return true;
     }
 
-    if (hasNewNotification) {
-        // ... (logic hiển thị tin nhắn giữ nguyên)
+    if (hasNewNotification)
+    {
+        bool shouldHide = false;
+        const int MAX_DISPLAY_TIME = 10000;
+
+        if (millis() - notificationStartTime > MAX_DISPLAY_TIME)
+        {
+            shouldHide = true;
+        }
+
+        int maxLines = 7;
+        if (isNotificationScrolling)
+        {
+            if (!hasScrolledOnce)
+            {
+                if (millis() - lastMessageScrollTime > 1500)
+                {
+                    lastMessageScrollTime = millis();
+                    messageScrollLine++;
+                    if (messageScrollLine > wrappedMessageLines.size() - maxLines)
+                    {
+                        hasScrolledOnce = true;
+                        scrollFinishedTime = millis();
+                        messageScrollLine = 0;
+                    }
+                }
+            }
+            else
+            {
+                if (millis() - scrollFinishedTime > _settings->notificationTimeout * 1000)
+                {
+                    shouldHide = true;
+                }
+            }
+        }
+        else
+        {
+            if (millis() - notificationStartTime > _settings->notificationTimeout * 1000)
+            {
+                shouldHide = true;
+            }
+        }
+
+        if (shouldHide)
+        {
+            hasNewNotification = false;
+            return false;
+        }
+
+        _sprite->fillSprite(TFT_BLACK);
+        const int boxX = 5, boxY = 10, boxW = 230, boxH = 200, cornerRadius = 10;
+        const int textPadding = 8, scrollbarWidth = 6;
+        const int lineHeight = 22;
+
+        _sprite->drawRoundRect(boxX, boxY, boxW, boxH, cornerRadius, TFT_CYAN);
+        String appName = latestNotification.app;
+        _font->print(_tft->width() - _font->getLength(appName) - 15, _tft->height() - 30, appName, TFT_CYAN, TFT_BLACK);
+
+        for (int i = 0; i < maxLines; i++)
+        {
+            int lineIndex = messageScrollLine + i;
+            if (lineIndex < wrappedMessageLines.size())
+            {
+                _font->print(boxX + textPadding, boxY + textPadding + i * lineHeight, wrappedMessageLines[lineIndex], TFT_WHITE, TFT_BLACK);
+            }
+        }
+
+        if (isNotificationScrolling)
+        {
+            int menuHeight = boxH - 10;
+            int scrollbarX = boxX + boxW - scrollbarWidth - 5;
+            _sprite->drawRect(scrollbarX, boxY + 5, scrollbarWidth, menuHeight, TFT_DARKGREY);
+
+            float thumbHeight = (float)maxLines / wrappedMessageLines.size() * menuHeight;
+            float thumbY = boxY + 5 + ((float)messageScrollLine / wrappedMessageLines.size() * menuHeight);
+            _sprite->fillRoundRect(scrollbarX, thumbY, scrollbarWidth, thumbHeight, 2, TFT_WHITE);
+        }
+
+        _sprite->pushSprite(0, 0);
         return true;
     }
 
@@ -259,9 +391,12 @@ bool chronos_has_new_notification() { return hasNewNotification; }
 bool chronos_has_new_navigation() { return hasNewNavigation; }
 
 // *** TRIỂN KHAI CÁC HÀM MỚI ***
-bool chronos_has_weather_data() {
+bool chronos_has_weather_data()
+{
     return hasWeatherData;
 }
-WeatherData chronos_get_weather() {
+
+WeatherData chronos_get_weather()
+{
     return latestWeather;
 }
