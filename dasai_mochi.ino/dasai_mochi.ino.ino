@@ -20,6 +20,7 @@
 #include "ui_effects.h"
 #include "analog_face.h"
 #include "DigitaltsLime35pt7b.h"
+#include "weather_icons.h"
 
 // --- CẤU HÌNH ---
 #define VIDEO_JUMP_TARGET 2
@@ -105,6 +106,36 @@ void handleSerialCommands() {
   }
 }
 
+// *** HÀM MỚI ĐỂ VẼ ICON THỜI TIẾT ***
+void drawWeatherIcon(int iconIndex, int x, int y)
+{
+    if (iconIndex < 0 || iconIndex > 7)
+    {
+        iconIndex = 7; // Mặc định là icon "Unknown" nếu chỉ số không hợp lệ
+    }
+    // Đọc con trỏ từ PROGMEM, sau đó đọc dữ liệu ảnh từ con trỏ đó
+    const uint16_t *icon_ptr = (const uint16_t *)pgm_read_ptr(&weather_icons[iconIndex]);
+    screenSprite.pushImage(x, y, WEATHER48_W, WEATHER48_H, icon_ptr);
+}
+
+String getWeatherLabel(int iconIndex)
+{
+  if (iconIndex < 0 || iconIndex > 7)
+  {
+    iconIndex = 7;
+  }
+  char buffer[20];
+  if (settings.currentLang == "vi")
+  {
+    strcpy_P(buffer, (char *)pgm_read_ptr(&(WEATHER_LABELS_VI[iconIndex])));
+  }
+  else
+  {
+    strcpy_P(buffer, (char *)pgm_read_ptr(&(WEATHER_LABELS_EN[iconIndex])));
+  }
+  return String(buffer);
+}
+
 // =======================================================================================
 // --- CÁC HÀM VẼ MẶT ĐỒNG HỒ ---
 // =======================================================================================
@@ -174,36 +205,51 @@ void drawAnalogWatchFace() {
 }
 
 // *** HÀM MỚI ĐỂ VẼ MÀN HÌNH THỜI TIẾT ***
-void drawWeatherScreen() {
-  screenSprite.fillSprite(TFT_BLACK);
-  if (!chronos_has_weather_data()) {
-    myfont.print(10, 10, "Khong co du lieu thoi tiet", TFT_YELLOW, TFT_BLACK);
-  } else {
-    WeatherData weather = chronos_get_weather();
-
-    // Tên thành phố
-    myfont.print((tft.width() - myfont.getLength(weather.city)) / 2, 20, weather.city, TFT_WHITE, TFT_BLACK);
-
-    // Nhiệt độ hiện tại (font lớn)
-    screenSprite.setFreeFont(&DigitaltsLime35pt7b);
-    String tempStr = String(weather.currentTemp) + "C";
-    int textWidth = screenSprite.textWidth(tempStr);
-    int x_pos = (tft.width() - textWidth) / 2;
-    screenSprite.setTextColor(TFT_ORANGE, TFT_BLACK);
-    screenSprite.drawString(tempStr, x_pos, 60);
-    screenSprite.setFreeFont(NULL);
-
-    // Nhiệt độ cao/thấp
-    String highLowStr = "H:" + String(weather.highTemp) + " L:" + String(weather.lowTemp);
-    myfont.print((tft.width() - myfont.getLength(highLowStr)) / 2, 130, highLowStr, TFT_WHITE, TFT_BLACK);
-
-    // Biểu tượng (dạng chữ)
-    myfont.print((tft.width() - myfont.getLength(weather.icon)) / 2, 160, weather.icon, TFT_CYAN, TFT_BLACK);
-
-    // Thông tin khác
-    String infoStr = "UV: " + String(weather.uv) + " | Ap suat: " + String(weather.pressure);
-    myfont.print((tft.width() - myfont.getLength(infoStr)) / 2, 200, infoStr, TFT_WHITE, TFT_BLACK);
+void drawWeatherScreen()
+{
+  if (!chronos_has_weather_data())
+  {
+    screenSprite.fillSprite(TFT_BLACK);
+    myfont.print(10, 110, "Khong co du lieu thoi tiet", TFT_YELLOW, TFT_BLACK);
+    screenSprite.pushSprite(0, 0);
+    return;
   }
+
+  WeatherData weather = chronos_get_weather();
+  int iconIndex = weather.icon;
+
+  // --- GIAI ĐOẠN 3: VẼ HIỆU ỨNG NỀN ĐỘNG ---
+  if (iconIndex == 3 || iconIndex == 4)
+  { // Mưa hoặc Dông
+    drawRainEffect(&tft, &screenSprite);
+  }
+  else
+  {
+    screenSprite.fillSprite(TFT_BLACK);
+  }
+
+  // --- GIAI ĐOẠN 2: VẼ GIAO DIỆN CHÍNH ---
+  myfont.print((tft.width() - myfont.getLength(weather.city)) / 2, 20, weather.city, TFT_WHITE, TFT_BLACK);
+
+  // Vẽ icon thời tiết
+  drawWeatherIcon(iconIndex, (tft.width() - WEATHER48_W) / 2, 50);
+
+  // Vẽ nhãn thời tiết
+  String label = getWeatherLabel(iconIndex);
+  myfont.print((tft.width() - myfont.getLength(label)) / 2, 105, label, TFT_CYAN, TFT_BLACK);
+
+  // Nhiệt độ hiện tại
+  String tempStr = String(weather.currentTemp) + " C";
+  myfont.print((tft.width() - myfont.getLength(tempStr)) / 2, 140, tempStr, TFT_ORANGE, TFT_BLACK);
+
+  // Nhiệt độ cao/thấp
+  String highLowStr = "H:" + String(weather.highTemp) + " L:" + String(weather.lowTemp);
+  myfont.print((tft.width() - myfont.getLength(highLowStr)) / 2, 170, highLowStr, TFT_WHITE, TFT_BLACK);
+
+  // Thông tin khác
+  String infoStr = "UV: " + String(weather.uv) + " | Ap suat: " + String(weather.pressure);
+  myfont.print((tft.width() - myfont.getLength(infoStr)) / 2, 200, infoStr, TFT_WHITE, TFT_BLACK);
+
   screenSprite.pushSprite(0, 0);
 }
 
@@ -223,6 +269,7 @@ void setup() {
   Flappy::begin(&screenSprite);
   CarGame::begin(&screenSprite);
   initMatrixRain(&tft);
+  initRainEffect(&tft);
 
   loadSettings();
 
@@ -403,7 +450,6 @@ void loop() {
           break;
         }
         drawWeatherScreen();
-        delay(1000);  // Cập nhật mỗi giây
         break;
       }
   }

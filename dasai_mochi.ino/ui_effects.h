@@ -61,4 +61,37 @@ void drawMatrixRainBackground(TFT_eSPI* tft, TFT_eSprite* sprite) {
     }
 }
 
+// --- HIỆU ỨNG MƯA THỜI TIẾT (MỚI) ---
+struct RainDrop {
+    int x, y;
+    int speed;
+    int len;
+};
+#define NUM_RAIN_DROPS 50
+static std::vector<RainDrop> rainDrops;
+
+void initRainEffect(TFT_eSPI* tft) {
+    rainDrops.clear();
+    for (int i = 0; i < NUM_RAIN_DROPS; i++) {
+        RainDrop drop;
+        drop.x = random(0, tft->width());
+        drop.y = random(0, tft->height());
+        drop.speed = random(5, 15);
+        drop.len = random(5, 10);
+        rainDrops.push_back(drop);
+    }
+}
+
+void drawRainEffect(TFT_eSPI* tft, TFT_eSprite* sprite) {
+    sprite->fillSprite(TFT_BLACK); // Xóa nền đen trước
+    for (auto& drop : rainDrops) {
+        drop.y += drop.speed;
+        if (drop.y > tft->height()) {
+            drop.y = 0;
+            drop.x = random(0, tft->width());
+        }
+        sprite->drawFastVLine(drop.x, drop.y, drop.len, TFT_CYAN);
+    }
+}
+
 #endif // UI_EFFECTS_H

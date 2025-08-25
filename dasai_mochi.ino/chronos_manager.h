@@ -12,7 +12,7 @@ struct WeatherData {
   int currentTemp;
   int highTemp;
   int lowTemp;
-  String icon;
+  int icon;
   int pressure;
   int uv;
 };
