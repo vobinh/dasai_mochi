@@ -19,7 +19,8 @@ enum Mode {
   GAME_FLAPPY,
   GAME_CAR,
   WATCH_MODE,
-  ANALOG_WATCH_MODE
+  ANALOG_WATCH_MODE,
+  WEATHER_MODE
 };
 
 // Struct to hold all application settings

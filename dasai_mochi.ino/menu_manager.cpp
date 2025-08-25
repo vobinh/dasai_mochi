@@ -26,7 +26,7 @@ static AppSettings temp_settings;
 
 // *** TĂNG SỐ LƯỢNG MỤC CÀI ĐẶT LÊN 8 ***
 static const int NUM_SETTING_ITEMS = 8;
-static const int NUM_MODE_ITEMS = 5;
+static const int NUM_MODE_ITEMS = 6;
 static String settingMenuItems[NUM_SETTING_ITEMS];
 static String modeMenuItems[NUM_MODE_ITEMS];
 static String tabNames[2];
@@ -145,7 +145,8 @@ Mode menu_handle_action(ButtonAction action) {
                     case 1: return GAME_CAR;
                     case 2: return WATCH_MODE;
                     case 3: return ANALOG_WATCH_MODE;
-                    case 4: return PLAYING;
+                    case 4: return WEATHER_MODE;
+                    case 5: return PLAYING;
                 }
             }
         }
