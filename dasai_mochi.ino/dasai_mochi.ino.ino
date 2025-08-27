@@ -9,6 +9,7 @@
 #include "FontMaker.h"
 
 #include "globals.h"
+#include "ui_utils.h"
 #include "menu_manager.h"
 #include "button_manager.h"
 #include "flappy_game.h"
@@ -21,6 +22,8 @@
 #include "analog_face.h"
 #include "DigitaltsLime35pt7b.h"
 #include "weather_icons.h"
+#include "player_icons.h"
+#include "audio_manager.h"
 
 // --- CẤU HÌNH ---
 #define VIDEO_JUMP_TARGET 2
@@ -44,18 +47,21 @@ bool isDisplayingAlert = false;
 
 // --- BIẾN CHO VIDEO & MẶT ĐỒNG HỒ ---
 typedef struct _VideoInfo {
-  const uint8_t* const* frames;
-  const uint16_t* frames_size;
+  const uint8_t *const *frames;
+  const uint16_t *frames_size;
   uint16_t num_frames;
 } VideoInfo;
 #include "video01.h"
 #include "video02.h"
 #include "video03.h"
 #include "video04.h"
-VideoInfo* flashVideoList[] = { &video01, &video02, &video03, &video04 };
+VideoInfo *flashVideoList[] = { &video01, &video02, &video03, &video04 };
 const uint8_t NUM_FLASH_VIDEOS = sizeof(flashVideoList) / sizeof(flashVideoList[0]);
 uint8_t currentVideoIndex = 0;
 uint16_t currentFrame = 0;
+
+int musicListScrollOffset = 0;
+int selectedMusicItem = 0;
 
 VideoInfo analogFaces = { analog_face_frames, analog_face_frames_size, analog_face_num_frames };
 
@@ -65,24 +71,28 @@ void loadSettings();
 void drawDigitalWatchFace();
 void drawAnalogWatchFace();
 void drawWeatherScreen();
+void drawMusicListScreen();
+void drawMusicPlayerScreen();
 
 // =======================================================================================
 // --- CÁC HÀM TIỆN ÍCH VÀ CALLBACK CHO VIỆC VẼ ---
 // =======================================================================================
 
 // Con trỏ toàn cục để trỏ đến sprite mục tiêu khi vẽ JPEG
-TFT_eSprite* jpegSpriteTarget = nullptr;
+TFT_eSprite *jpegSpriteTarget = nullptr;
 
 // Callback để vẽ JPEG trực tiếp lên màn hình (cho video)
-bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
-  if (x >= tft.width() || y >= tft.height()) return false;
+bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap) {
+  if (x >= tft.width() || y >= tft.height())
+    return false;
   tft.pushImage(x, y, w, h, bitmap);
   return true;
 }
 
 // Callback mới để vẽ JPEG lên một sprite (cho mặt đồng hồ)
-bool sprite_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
-  if (!jpegSpriteTarget) return false;  // An toàn nếu con trỏ chưa được thiết lập
+bool sprite_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap) {
+  if (!jpegSpriteTarget)
+    return false;  // An toàn nếu con trỏ chưa được thiết lập
   jpegSpriteTarget->pushImage(x, y, w, h, bitmap);
   return true;
 }
@@ -97,40 +107,109 @@ void handleSerialCommands() {
     command.trim();
     if (command == "reset_config") {
       Serial.println("Received command: reset_config");
-      if (!SPIFFS.begin(true)) { return; }
-      if (SPIFFS.exists(CONFIG_FILE)) { SPIFFS.remove(CONFIG_FILE); }
+      if (!SPIFFS.begin(true)) {
+        return;
+      }
+      if (SPIFFS.exists(CONFIG_FILE)) {
+        SPIFFS.remove(CONFIG_FILE);
+      }
       Serial.println("Restarting...");
+      delay(1000);
+      ESP.restart();
+    } else if (command.startsWith("set_tracks:")) {
+      Serial.println("Received command: set_tracks");
+      String trackNamesStr = command.substring(11);  // Lấy chuỗi sau "set_tracks:"
+
+      std::vector<String> newTrackList;
+      int lastComma = -1;
+      for (int i = 0; i < trackNamesStr.length(); i++) {
+        if (trackNamesStr.charAt(i) == ',') {
+          newTrackList.push_back(trackNamesStr.substring(lastComma + 1, i));
+          lastComma = i;
+        }
+      }
+      newTrackList.push_back(trackNamesStr.substring(lastComma + 1));
+
+      audio_update_tracklist(newTrackList);
+      saveSettings();  // Lưu lại file config với danh sách mới
+      Serial.println("Tracklist updated. Restarting...");
       delay(1000);
       ESP.restart();
     }
   }
 }
 
-// *** HÀM MỚI ĐỂ VẼ ICON THỜI TIẾT ***
-void drawWeatherIcon(int iconIndex, int x, int y)
-{
-    if (iconIndex < 0 || iconIndex > 7)
-    {
-        iconIndex = 7; // Mặc định là icon "Unknown" nếu chỉ số không hợp lệ
+void drawMusicListScreen() {
+  screenSprite.fillSprite(TFT_BLACK);
+  const int itemHeight = 28;
+  const int maxVisibleItems = 6;
+
+  int trackCount = audio_get_track_count();
+  if (trackCount == 0) {
+    myfont.print(10, 110, "Không Có Bài Hát", TFT_YELLOW, TFT_BLACK);
+  } else {
+    for (int i = 0; i < maxVisibleItems; i++) {
+      int trackIndex = musicListScrollOffset + i;
+      if (trackIndex >= trackCount) break;
+
+      int yPos = 20 + i * (itemHeight + 5);
+      if (trackIndex == selectedMusicItem) {
+        screenSprite.drawRoundRect(5, yPos - 4, tft.width() - 10, itemHeight, 5, TFT_WHITE);
+      }
+      String trackName = audio_get_track_name(trackIndex);
+      drawMarqueeText(&screenSprite, &myfont, trackName, 15, yPos, tft.width() - 30, TFT_WHITE, TFT_BLACK, trackIndex == selectedMusicItem, settings.marqueeSpeed);
     }
-    // Đọc con trỏ từ PROGMEM, sau đó đọc dữ liệu ảnh từ con trỏ đó
-    const uint16_t *icon_ptr = (const uint16_t *)pgm_read_ptr(&weather_icons[iconIndex]);
-    screenSprite.pushImage(x, y, WEATHER48_W, WEATHER48_H, icon_ptr);
+  }
+  screenSprite.pushSprite(0, 0);
 }
 
-String getWeatherLabel(int iconIndex)
-{
-  if (iconIndex < 0 || iconIndex > 7)
-  {
+void drawMusicPlayerScreen() {
+  // 1. Vẽ nền hiệu ứng sóng nhạc
+  drawMusicVisualizer(&screenSprite, audio_is_playing());
+
+  // 2. Vẽ tên bài hát (chạy chữ)
+  String trackName = audio_get_current_track_name();
+  int trackNameWidth = myfont.getLength(trackName);
+  int availableWidth = tft.width() - 20;
+  if (trackNameWidth <= availableWidth) {
+    int x_pos = (tft.width() - trackNameWidth) / 2;
+    myfont.print(x_pos, 80, trackName, TFT_CYAN, TFT_BLACK);
+  } else {
+    drawMarqueeText(&screenSprite, &myfont, trackName, 10, 80, availableWidth, TFT_CYAN, TFT_BLACK, true, settings.marqueeSpeed);
+  }
+
+  // 3. Vẽ icon Play/Pause
+  if (audio_is_playing()) {
+    screenSprite.pushImage((tft.width() - 64) / 2, 120, 64, 64, pause_icon);
+  } else {
+    screenSprite.pushImage((tft.width() - 64) / 2, 120, 64, 64, play_icon);
+  }
+
+  // 4. Vẽ hướng dẫn
+  // myfont.print(10, 210, "Next(2)", TFT_WHITE, TFT_BLACK);
+  // myfont.print(tft.width() - myfont.getLength("List(3)") - 10, 210, "List(3)", TFT_WHITE, TFT_BLACK);
+
+  screenSprite.pushSprite(0, 0);
+}
+
+// *** HÀM MỚI ĐỂ VẼ ICON THỜI TIẾT ***
+void drawWeatherIcon(int iconIndex, int x, int y) {
+  if (iconIndex < 0 || iconIndex > 7) {
+    iconIndex = 7;  // Mặc định là icon "Unknown" nếu chỉ số không hợp lệ
+  }
+  // Đọc con trỏ từ PROGMEM, sau đó đọc dữ liệu ảnh từ con trỏ đó
+  const uint16_t *icon_ptr = (const uint16_t *)pgm_read_ptr(&weather_icons[iconIndex]);
+  screenSprite.pushImage(x, y, WEATHER48_W, WEATHER48_H, icon_ptr);
+}
+
+String getWeatherLabel(int iconIndex) {
+  if (iconIndex < 0 || iconIndex > 7) {
     iconIndex = 7;
   }
   char buffer[20];
-  if (settings.currentLang == "vi")
-  {
+  if (settings.currentLang == "vi") {
     strcpy_P(buffer, (char *)pgm_read_ptr(&(WEATHER_LABELS_VI[iconIndex])));
-  }
-  else
-  {
+  } else {
     strcpy_P(buffer, (char *)pgm_read_ptr(&(WEATHER_LABELS_EN[iconIndex])));
   }
   return String(buffer);
@@ -143,7 +222,7 @@ void drawDigitalWatchFace() {
   drawMatrixRainBackground(&tft, &screenSprite);
 
   if (!chronos_is_time_synced()) {
-    String msg = "Dang ket noi...";
+    String msg = "Đang Kết Nối...";
     myfont.print((tft.width() - myfont.getLength(msg)) / 2, tft.height() / 2, msg, TFT_YELLOW, TFT_BLACK);
   } else {
     screenSprite.setFreeFont(&DigitaltsLime35pt7b);
@@ -177,7 +256,7 @@ void drawAnalogWatchFace() {
   TJpgDec.setCallback(sprite_output);
 
   // 2. Lấy dữ liệu và vẽ hình nền JPEG trực tiếp lên sprite
-  const uint8_t* jpg_data = (const uint8_t*)pgm_read_ptr(&analogFaces.frames[settings.currentAnalogFaceIndex]);
+  const uint8_t *jpg_data = (const uint8_t *)pgm_read_ptr(&analogFaces.frames[settings.currentAnalogFaceIndex]);
   uint16_t jpg_size = pgm_read_word(&analogFaces.frames_size[settings.currentAnalogFaceIndex]);
   TJpgDec.drawJpg(0, 0, jpg_data, jpg_size);
 
@@ -205,12 +284,10 @@ void drawAnalogWatchFace() {
 }
 
 // *** HÀM MỚI ĐỂ VẼ MÀN HÌNH THỜI TIẾT ***
-void drawWeatherScreen()
-{
-  if (!chronos_has_weather_data())
-  {
+void drawWeatherScreen() {
+  if (!chronos_has_weather_data()) {
     screenSprite.fillSprite(TFT_BLACK);
-    myfont.print(10, 110, "Khong co du lieu thoi tiet", TFT_YELLOW, TFT_BLACK);
+    myfont.print(10, 110, "Chưa Đồng Bộ", TFT_YELLOW, TFT_BLACK);
     screenSprite.pushSprite(0, 0);
     return;
   }
@@ -219,12 +296,9 @@ void drawWeatherScreen()
   int iconIndex = weather.icon;
 
   // --- GIAI ĐOẠN 3: VẼ HIỆU ỨNG NỀN ĐỘNG ---
-  if (iconIndex == 3 || iconIndex == 4)
-  { // Mưa hoặc Dông
+  if (iconIndex == 3 || iconIndex == 4) {  // Mưa hoặc Dông
     drawRainEffect(&tft, &screenSprite);
-  }
-  else
-  {
+  } else {
     screenSprite.fillSprite(TFT_BLACK);
   }
 
@@ -247,7 +321,7 @@ void drawWeatherScreen()
   myfont.print((tft.width() - myfont.getLength(highLowStr)) / 2, 170, highLowStr, TFT_WHITE, TFT_BLACK);
 
   // Thông tin khác
-  String infoStr = "UV: " + String(weather.uv) + " | Ap suat: " + String(weather.pressure);
+  String infoStr = "UV: " + String(weather.uv) + " | Áp Suất: " + String(weather.pressure);
   myfont.print((tft.width() - myfont.getLength(infoStr)) / 2, 200, infoStr, TFT_WHITE, TFT_BLACK);
 
   screenSprite.pushSprite(0, 0);
@@ -265,20 +339,25 @@ void setup() {
   button_init();
 
   menu_init(&tft, &screenSprite, &myfont, &settings);
+
   chronos_init(&tft, &screenSprite, &myfont, &settings);
   Flappy::begin(&screenSprite);
   CarGame::begin(&screenSprite);
   initMatrixRain(&tft);
   initRainEffect(&tft);
+  initMusicVisualizer(&tft);
+  audio_init();
 
   loadSettings();
 
   tft.setRotation(settings.currentRotation);
   tft.fillScreen(TFT_BLACK);
-
   TJpgDec.setJpgScale(1);
   TJpgDec.setSwapBytes(true);
-  TJpgDec.setCallback(tft_output);  // Thiết lập callback mặc định
+  TJpgDec.setCallback(tft_output);
+
+  audio_set_volume(settings.volume);
+  audio_set_autoplay(settings.musicAutoPlayNext);
 
   hourHandSprite.createSprite(HOUR_HAND_WIDTH, HOUR_HAND_HEIGHT);
   hourHandSprite.setPivot(HOUR_PIVOT_X, HOUR_PIVOT_Y);
@@ -296,6 +375,7 @@ void setup() {
 void loop() {
   handleSerialCommands();
   chronos_loop();
+  audio_loop();  // *** GỌI HÀM LOOP CỦA MODULE ÂM THANH ***
   ButtonAction action = getButtonAction();
 
   bool isAlertEvent = chronos_is_ringing() || chronos_has_new_notification() || chronos_has_new_navigation();
@@ -313,6 +393,7 @@ void loop() {
   switch (currentMode) {
     case PLAYING:
       {
+        static int lastVideoIndex = -1;
         if (action == ACTION_TRIPLE || action == ACTION_LONG) {
           currentMode = MENU;
           menu_enter();
@@ -326,11 +407,21 @@ void loop() {
           currentFrame = 0;
         }
 
-        if (currentVideoIndex >= NUM_FLASH_VIDEOS) currentVideoIndex = 0;
-        VideoInfo* currentVideo = flashVideoList[currentVideoIndex];
+        // *** PHÁT ÂM THANH KHI VIDEO THAY ĐỔI ***
+        if (lastVideoIndex != currentVideoIndex) {
+          if (settings.soundEnabled) {
+            audio_set_autoplay(false);
+            audio_play_video_sound(currentVideoIndex);
+          }
+          lastVideoIndex = currentVideoIndex;
+        }
+
+        if (currentVideoIndex >= NUM_FLASH_VIDEOS)
+          currentVideoIndex = 0;
+        VideoInfo *currentVideo = flashVideoList[currentVideoIndex];
         // Vẽ video trực tiếp lên màn hình
         TJpgDec.setCallback(tft_output);
-        const uint8_t* jpg_data = (const uint8_t*)pgm_read_ptr(&currentVideo->frames[currentFrame]);
+        const uint8_t *jpg_data = (const uint8_t *)pgm_read_ptr(&currentVideo->frames[currentFrame]);
         uint16_t jpg_size = pgm_read_word(&currentVideo->frames_size[currentFrame]);
         TJpgDec.drawJpg(0, 0, jpg_data, jpg_size);
 
@@ -339,6 +430,9 @@ void loop() {
         if (currentFrame >= currentVideo->num_frames) {
           currentFrame = 0;
           currentVideoIndex = (currentVideoIndex + 1) % NUM_FLASH_VIDEOS;
+          if (settings.soundEnabled) {
+            audio_stop();
+          }
         }
         break;
       }
@@ -351,11 +445,15 @@ void loop() {
             saveSettings();
             loadSettings();
             tft.setRotation(settings.currentRotation);
+            audio_set_volume(settings.volume);
+            audio_set_autoplay(settings.musicAutoPlayNext);
           }
           currentMode = newMode;
           tft.fillScreen(TFT_BLACK);
-          if (currentMode == GAME_FLAPPY) Flappy::start();
-          if (currentMode == GAME_CAR) CarGame::start();
+          if (currentMode == GAME_FLAPPY)
+            Flappy::start();
+          if (currentMode == GAME_CAR)
+            CarGame::start();
         } else {
           menu_draw();
         }
@@ -396,8 +494,13 @@ void loop() {
           menu_enter();
           break;
         }
-        if (action == ACTION_SINGLE) CarGame::moveRight();
-        if (action == ACTION_DOUBLE) CarGame::moveLeft();
+        if (action == ACTION_SINGLE)
+          CarGame::moveRight();
+        if (action == ACTION_DOUBLE)
+          CarGame::moveLeft();
+        if (action == ACTION_SINGLE && !CarGame::isRunning()) {
+          CarGame::start();
+        }
         CarGame::tick();
         screenSprite.pushSprite(0, 0);
         break;
@@ -452,6 +555,38 @@ void loop() {
         drawWeatherScreen();
         break;
       }
+    case MUSIC_LIST_MODE:
+      {
+        if (action == ACTION_SINGLE) {
+          selectedMusicItem = (selectedMusicItem + 1) % audio_get_track_count();
+          // Logic cuộn tương tự menu
+        }
+        if (action == ACTION_LONG) {
+          audio_set_autoplay(settings.musicAutoPlayNext);
+          audio_play_music(selectedMusicItem);
+          currentMode = MUSIC_PLAYER_MODE;
+        }
+        if (action == ACTION_TRIPLE) {  // Thoát về menu
+          currentMode = MENU;
+          menu_enter();
+        }
+        drawMusicListScreen();
+        break;
+      }
+
+    case MUSIC_PLAYER_MODE:
+      {
+        if (action == ACTION_SINGLE) audio_pause_resume();
+        if (action == ACTION_DOUBLE) audio_next();
+        if (action == ACTION_TRIPLE) currentMode = MUSIC_LIST_MODE;
+        if (action == ACTION_LONG) {
+          audio_stop();
+          currentMode = MENU;
+          menu_enter();
+        }
+        drawMusicPlayerScreen();
+        break;
+      }
   }
 }
 
@@ -459,16 +594,26 @@ void loop() {
 void saveSettings() {
   Serial.println("Saving settings to SPIFFS...");
   File configFile = SPIFFS.open(CONFIG_FILE, "w");
-  if (!configFile) return;
+  if (!configFile)
+    return;
 
   StaticJsonDocument<1024> doc;
   doc["frameDelay"] = settings.frameDelay;
   doc["currentRotation"] = settings.currentRotation;
   doc["language"] = settings.currentLang;
-  doc["useSD"] = settings.useSD;
   doc["notificationTimeout"] = settings.notificationTimeout;
   doc["marqueeSpeed"] = settings.marqueeSpeed;
   doc["currentAnalogFaceIndex"] = settings.currentAnalogFaceIndex;
+  doc["soundEnabled"] = settings.soundEnabled;
+  doc["volume"] = settings.volume;
+  doc["musicAutoPlayNext"] = settings.musicAutoPlayNext;
+
+  // *** LƯU DANH SÁCH NHẠC VÀO JSON ***
+  JsonArray tracks = doc.createNestedArray("trackList");
+  const std::vector<String> &trackListRef = audio_get_tracklist_ref();
+  for (const String &track : trackListRef) {
+    tracks.add(track);
+  }
 
   JsonObject menu_vi = doc.createNestedObject("menu_vi");
   menu_vi["tab_setting"] = "Cài đặt";
@@ -477,18 +622,21 @@ void saveSettings() {
   setting_vi["item0"] = "Tốc độ video";
   setting_vi["item1"] = "Xoay màn hình";
   setting_vi["item2"] = "Ngôn ngữ";
-  setting_vi["item3"] = "Thẻ SD";
-  setting_vi["item4"] = "TG Thông Báo";
-  setting_vi["item5"] = "Tốc độ chữ";
-  setting_vi["item6"] = "Lưu";
-  setting_vi["item7"] = "Thoát";
+  setting_vi["item3"] = "TG Thông Báo";
+  setting_vi["item4"] = "Tốc độ chữ";
+  setting_vi["item5"] = "Âm thanh";
+  setting_vi["item6"] = "Âm lượng";
+  setting_vi["item7"] = "Tự Động Chuyển Bài";
+  setting_vi["item8"] = "Lưu";
+  setting_vi["item9"] = "Thoát";
   JsonObject mode_vi = menu_vi.createNestedObject("mode");
   mode_vi["item0"] = "Chơi Flappy";
   mode_vi["item1"] = "Chơi Đua Xe";
   mode_vi["item2"] = "Đồng hồ số";
   mode_vi["item3"] = "Đồng hồ kim";
   mode_vi["item4"] = "Thời Tiết";
-  mode_vi["item5"] = "Thoát";
+  mode_vi["item5"] = "Nghe Nhạc";
+  mode_vi["item6"] = "Thoát";
 
   JsonObject menu_en = doc.createNestedObject("menu_en");
   menu_en["tab_setting"] = "SETTING";
@@ -497,18 +645,21 @@ void saveSettings() {
   setting_en["item0"] = "Video Speed";
   setting_en["item1"] = "Screen Rotation";
   setting_en["item2"] = "Language";
-  setting_en["item3"] = "SD Card";
-  setting_en["item4"] = "Notif. Time";
-  setting_en["item5"] = "Marquee Speed";
-  setting_en["item6"] = "Save";
-  setting_en["item7"] = "Exit";
+  setting_en["item3"] = "Notif. Time";
+  setting_en["item4"] = "Marquee Speed";
+  setting_en["item5"] = "Sound Enabled";
+  setting_en["item6"] = "Volume";
+  setting_en["item7"] = "Auto Next";
+  setting_en["item8"] = "Save";
+  setting_en["item9"] = "Exit";
   JsonObject mode_en = menu_en.createNestedObject("mode");
   mode_en["item0"] = "Play Flappy";
   mode_en["item1"] = "Play Car Game";
   mode_en["item2"] = "Watch (Digital)";
   mode_en["item3"] = "Watch (Analog)";
-  mode_en["item4"] = "Weather"; 
-  mode_en["item5"] = "Exit";
+  mode_en["item4"] = "Weather";
+  mode_en["item5"] = "Play Music";
+  mode_en["item6"] = "Exit";
 
   serializeJson(doc, configFile);
   configFile.close();
@@ -529,10 +680,21 @@ void loadSettings() {
       settings.frameDelay = doc["frameDelay"] | 20;
       settings.currentRotation = doc["currentRotation"] | 3;
       settings.currentLang = doc["language"] | "vi";
-      settings.useSD = doc["useSD"] | false;
       settings.notificationTimeout = doc["notificationTimeout"] | 5;
       settings.marqueeSpeed = doc["marqueeSpeed"] | 35;
       settings.currentAnalogFaceIndex = doc["currentAnalogFaceIndex"] | 0;
+      settings.soundEnabled = doc["soundEnabled"] | false;
+      settings.volume = doc["volume"] | 10;
+      settings.musicAutoPlayNext = doc["musicAutoPlayNext"] | true;
+
+      // *** TẢI DANH SÁCH NHẠC TỪ JSON ***
+      JsonArray tracks = doc["trackList"];
+      std::vector<String> loadedTracks;
+      for (JsonVariant v : tracks) {
+        loadedTracks.push_back(v.as<String>());
+      }
+      audio_update_tracklist(loadedTracks);
+
       menu_load_strings(doc.as<JsonObject>());
       success = true;
     }
@@ -544,10 +706,14 @@ void loadSettings() {
     settings.frameDelay = 20;
     settings.currentRotation = 3;
     settings.currentLang = "vi";
-    settings.useSD = false;
     settings.notificationTimeout = 5;
     settings.marqueeSpeed = 35;
     settings.currentAnalogFaceIndex = 0;
+    settings.soundEnabled = false;
+    settings.volume = 15;
+    settings.musicAutoPlayNext = true;
+
+    audio_update_tracklist({});  // Tạo danh sách trống
 
     StaticJsonDocument<1024> default_doc;
     JsonObject menu_vi = default_doc.createNestedObject("menu_vi");
@@ -557,18 +723,21 @@ void loadSettings() {
     setting_vi["item0"] = "Tốc độ video";
     setting_vi["item1"] = "Xoay màn hình";
     setting_vi["item2"] = "Ngôn ngữ";
-    setting_vi["item3"] = "Thẻ SD";
-    setting_vi["item4"] = "TG Thông Báo";
-    setting_vi["item5"] = "Tốc độ chữ";
-    setting_vi["item6"] = "Lưu";
-    setting_vi["item7"] = "Thoát";
+    setting_vi["item3"] = "TG Thông Báo";
+    setting_vi["item4"] = "Tốc độ chữ";
+    setting_vi["item5"] = "Âm thanh";
+    setting_vi["item6"] = "Âm lượng";
+    setting_vi["item7"] = "Tự Động Chuyển Bài";
+    setting_vi["item8"] = "Lưu";
+    setting_vi["item9"] = "Thoát";
     JsonObject mode_vi = default_doc.createNestedObject("mode");
     mode_vi["item0"] = "Chơi Flappy";
     mode_vi["item1"] = "Chơi Đua Xe";
     mode_vi["item2"] = "Đồng hồ số";
     mode_vi["item3"] = "Đồng hồ kim";
-    mode_vi["item4"] = "Thời tiết"; 
-    mode_vi["item5"] = "Thoát";
+    mode_vi["item4"] = "Thời tiết";
+    mode_vi["item5"] = "Nghe nhạc";
+    mode_vi["item6"] = "Thoát";
 
     JsonObject menu_en = default_doc.createNestedObject("menu_en");
     menu_en["tab_setting"] = "SETTING";
@@ -577,18 +746,21 @@ void loadSettings() {
     setting_en["item0"] = "Video Speed";
     setting_en["item1"] = "Screen Rotation";
     setting_en["item2"] = "Language";
-    setting_en["item3"] = "SD Card";
-    setting_en["item4"] = "Notif. Time";
-    setting_en["item5"] = "Marquee Speed";
-    setting_en["item6"] = "Save";
-    setting_en["item7"] = "Exit";
+    setting_en["item3"] = "Notif. Time";
+    setting_en["item4"] = "Marquee Speed";
+    setting_en["item5"] = "Sound Enabled";
+    setting_en["item6"] = "Volume";
+    setting_en["item7"] = "Auto Next";
+    setting_en["item8"] = "Save";
+    setting_en["item9"] = "Exit";
     JsonObject mode_en = default_doc.createNestedObject("mode");
     mode_en["item0"] = "Play Flappy";
     mode_en["item1"] = "Play Car Game";
     mode_en["item2"] = "Watch (Digital)";
     mode_en["item3"] = "Watch (Analog)";
-    mode_en["item4"] = "Weather"; 
-    mode_en["item5"] = "Exit";
+    mode_en["item4"] = "Weather";
+    mode_en["item5"] = "Play Music";
+    mode_en["item6"] = "Exit";
 
     menu_load_strings(default_doc.as<JsonObject>());
 

@@ -1,9 +1,8 @@
 #ifndef GLOBALS_H
 #define GLOBALS_H
 
-#include <Arduino.h> // Include for String type
+#include <Arduino.h>
 
-// Enum for button press types
 enum ButtonAction { 
   ACTION_NONE, 
   ACTION_SINGLE, 
@@ -12,7 +11,6 @@ enum ButtonAction {
   ACTION_LONG 
 };
 
-// Enum for different application modes
 enum Mode {
   PLAYING,
   MENU,
@@ -20,18 +18,21 @@ enum Mode {
   GAME_CAR,
   WATCH_MODE,
   ANALOG_WATCH_MODE,
-  WEATHER_MODE
+  WEATHER_MODE,
+  MUSIC_LIST_MODE,
+  MUSIC_PLAYER_MODE
 };
 
-// Struct to hold all application settings
 struct AppSettings {
   int frameDelay;
   int currentRotation;
   String currentLang;
-  bool useSD;
   int notificationTimeout;
-  int marqueeSpeed; // *** BIẾN MỚI ĐỂ LƯU TỐC ĐỘ CHỮ CHẠY ***
-  int currentAnalogFaceIndex; // *** BIẾN MỚI ĐỂ LƯU MẶT ĐỒNG HỒ KIM ĐÃ CHỌN ***
+  int marqueeSpeed;
+  int currentAnalogFaceIndex;
+  bool soundEnabled; // *** BIẾN MỚI: Bật/tắt âm thanh ***
+  int volume;        // *** BIẾN MỚI: Mức âm lượng (0-30) ***
+  bool musicAutoPlayNext;
 };
 
 #endif

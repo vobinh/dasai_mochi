@@ -4,6 +4,56 @@
 #include <TFT_eSPI.h>
 #include <vector>
 
+struct VisualizerBar {
+    int x;
+    float currentHeight;
+    float targetHeight;
+    float speed;
+};
+#define NUM_VIZ_BARS 16
+static std::vector<VisualizerBar> vizBars;
+
+void initMusicVisualizer(TFT_eSPI* tft) {
+    vizBars.clear();
+    int barWidth = tft->width() / NUM_VIZ_BARS;
+    for (int i = 0; i < NUM_VIZ_BARS; i++) {
+        VisualizerBar bar;
+        bar.x = i * barWidth;
+        bar.currentHeight = 0;
+        bar.targetHeight = random(10, 50);
+        bar.speed = random(1, 5) / 10.0f;
+        vizBars.push_back(bar);
+    }
+}
+
+/**
+ * @brief Vẽ hiệu ứng sóng nhạc.
+ * @param sprite Con trỏ đến sprite để vẽ lên.
+ * @param isPlaying True nếu nhạc đang phát, để kích hoạt hoạt ảnh.
+ */
+void drawMusicVisualizer(TFT_eSprite* sprite, bool isPlaying) {
+    sprite->fillSprite(TFT_BLACK);
+    int barWidth = sprite->width() / NUM_VIZ_BARS;
+    for (auto& bar : vizBars) {
+        // *** LOGIC MỚI: CHỈ CẬP NHẬT HOẠT ẢNH KHI NHẠC ĐANG PHÁT ***
+        if (isPlaying) {
+            if (abs(bar.currentHeight - bar.targetHeight) < 1) {
+                bar.targetHeight = random(10, 80);
+                bar.speed = random(2, 8) / 10.0f;
+            }
+            bar.currentHeight += (bar.targetHeight - bar.currentHeight) * bar.speed;
+        }
+
+        // Luôn vẽ các cột sóng, dù chúng đang di chuyển hay đứng yên
+        int h = bar.currentHeight;
+        uint16_t color = TFT_GREEN;
+        if (h > 40) color = TFT_YELLOW;
+        if (h > 60) color = TFT_RED;
+        
+        sprite->fillRect(bar.x, sprite->height() - h, barWidth - 2, h, color);
+    }
+}
+
 // Cấu trúc để lưu thông tin của mỗi hạt mưa số
 struct RainParticle {
     float x, y;

@@ -15,18 +15,19 @@ static enum EditMode {
     EDIT_SPEED, 
     EDIT_ROTATION, 
     EDIT_LANGUAGE, 
-    EDIT_SD, 
     EDIT_NOTIF_TIME,
-    EDIT_MARQUEE_SPEED // *** THÊM TRẠNG THÁI CHỈNH SỬA MỚI ***
+    EDIT_MARQUEE_SPEED,
+    EDIT_SOUND_ENABLED,
+    EDIT_VOLUME,
+    EDIT_AUTOPLAY
 } currentEditMode;
 
 static int selectedMenuItem = 0;
 static int menuScrollOffset = 0;
 static AppSettings temp_settings;
 
-// *** TĂNG SỐ LƯỢNG MỤC CÀI ĐẶT LÊN 8 ***
-static const int NUM_SETTING_ITEMS = 8;
-static const int NUM_MODE_ITEMS = 6;
+static const int NUM_SETTING_ITEMS = 10;
+static const int NUM_MODE_ITEMS = 7;
 static String settingMenuItems[NUM_SETTING_ITEMS];
 static String modeMenuItems[NUM_MODE_ITEMS];
 static String tabNames[2];
@@ -88,9 +89,6 @@ Mode menu_handle_action(ButtonAction action) {
                 case EDIT_LANGUAGE:
                     temp_settings.currentLang = (temp_settings.currentLang == "vi") ? "en" : "vi";
                     break;
-                case EDIT_SD:
-                    temp_settings.useSD = !temp_settings.useSD;
-                    break;
                 case EDIT_NOTIF_TIME:
                     temp_settings.notificationTimeout++;
                     if (temp_settings.notificationTimeout > 10) temp_settings.notificationTimeout = 3;
@@ -99,6 +97,16 @@ Mode menu_handle_action(ButtonAction action) {
                 case EDIT_MARQUEE_SPEED:
                     temp_settings.marqueeSpeed -= 5; // Số nhỏ hơn = nhanh hơn
                     if (temp_settings.marqueeSpeed < 10) temp_settings.marqueeSpeed = 50;
+                    break;
+                case EDIT_SOUND_ENABLED:
+                    temp_settings.soundEnabled = !temp_settings.soundEnabled;
+                    break;
+                case EDIT_VOLUME:
+                    temp_settings.volume += 5;
+                    if (temp_settings.volume > 30) temp_settings.volume = 0;
+                    break;
+                case EDIT_AUTOPLAY:
+                    temp_settings.musicAutoPlayNext = !temp_settings.musicAutoPlayNext;
                     break;
                 default: break;
             }
@@ -127,15 +135,16 @@ Mode menu_handle_action(ButtonAction action) {
                     case 0: currentEditMode = EDIT_SPEED; break;
                     case 1: currentEditMode = EDIT_ROTATION; break;
                     case 2: currentEditMode = EDIT_LANGUAGE; break;
-                    case 3: currentEditMode = EDIT_SD; break;
-                    case 4: currentEditMode = EDIT_NOTIF_TIME; break;
-                    // *** THÊM LỰA CHỌN MỚI, CẬP NHẬT INDEX CỦA LƯU VÀ THOÁT ***
-                    case 5: currentEditMode = EDIT_MARQUEE_SPEED; break;
-                    case 6: // Save
+                    case 3: currentEditMode = EDIT_NOTIF_TIME; break;
+                    case 4: currentEditMode = EDIT_MARQUEE_SPEED; break;
+                    case 5: currentEditMode = EDIT_SOUND_ENABLED; break;
+                    case 6: currentEditMode = EDIT_VOLUME; break;
+                    case 7: currentEditMode = EDIT_AUTOPLAY; break;
+                    case 8: // Save
                         memcpy(app_settings, &temp_settings, sizeof(AppSettings));
                         save_was_triggered = true;
                         return PLAYING;
-                    case 7: // Exit
+                    case 9: // Exit
                         save_was_triggered = false;
                         return PLAYING;
                 }
@@ -146,7 +155,8 @@ Mode menu_handle_action(ButtonAction action) {
                     case 2: return WATCH_MODE;
                     case 3: return ANALOG_WATCH_MODE;
                     case 4: return WEATHER_MODE;
-                    case 5: return PLAYING;
+                    case 5: return MUSIC_LIST_MODE;
+                    case 6: return PLAYING;
                 }
             }
         }
@@ -195,9 +205,11 @@ static void draw_menu_internal() {
     if (currentEditMode == EDIT_SPEED) itemToHighlight = 0;
     if (currentEditMode == EDIT_ROTATION) itemToHighlight = 1;
     if (currentEditMode == EDIT_LANGUAGE) itemToHighlight = 2;
-    if (currentEditMode == EDIT_SD) itemToHighlight = 3;
-    if (currentEditMode == EDIT_NOTIF_TIME) itemToHighlight = 4;
-    if (currentEditMode == EDIT_MARQUEE_SPEED) itemToHighlight = 5; // *** THÊM HIGHLIGHT MỚI ***
+    if (currentEditMode == EDIT_NOTIF_TIME) itemToHighlight = 3;
+    if (currentEditMode == EDIT_MARQUEE_SPEED) itemToHighlight = 4;
+    if (currentEditMode == EDIT_SOUND_ENABLED) itemToHighlight = 5;
+    if (currentEditMode == EDIT_VOLUME) itemToHighlight = 6;
+    if (currentEditMode == EDIT_AUTOPLAY) itemToHighlight = 7;
   }
 
   int startItem = menuScrollOffset;
@@ -226,9 +238,11 @@ static void draw_menu_internal() {
       if (i == 0) valueStr = String(temp_settings.frameDelay);
       if (i == 1) valueStr = String(temp_settings.currentRotation*90) + " deg";
       if (i == 2) valueStr = (temp_settings.currentLang == "vi") ? "VI" : "EN";
-      if (i == 3) valueStr = temp_settings.useSD ? "ON" : "OFF";
-      if (i == 4) valueStr = String(temp_settings.notificationTimeout) + "s";
-      if (i == 5) valueStr = String(temp_settings.marqueeSpeed); // *** HIỂN THỊ GIÁ TRỊ MỚI ***
+      if (i == 3) valueStr = String(temp_settings.notificationTimeout) + "s";
+      if (i == 4) valueStr = String(temp_settings.marqueeSpeed);
+      if (i == 5) valueStr = temp_settings.soundEnabled ? "ON" : "OFF";
+      if (i == 6) valueStr = String(temp_settings.volume);
+      if (i == 7) valueStr = temp_settings.musicAutoPlayNext ? "ON" : "OFF";
     }
 
     int totalAvailableWidth = tft->width() - paddingX * 2 - scrollbarWidth - 10;
