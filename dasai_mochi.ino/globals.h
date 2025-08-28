@@ -11,6 +11,11 @@ enum ButtonAction {
   ACTION_LONG 
 };
 
+enum DisplayShape {
+  SHAPE_SQUARE,
+  SHAPE_ROUND
+};
+
 enum Mode {
   PLAYING,
   MENU,
@@ -33,6 +38,7 @@ struct AppSettings {
   bool soundEnabled; // *** BIẾN MỚI: Bật/tắt âm thanh ***
   int volume;        // *** BIẾN MỚI: Mức âm lượng (0-30) ***
   bool musicAutoPlayNext;
+  DisplayShape displayShape; 
 };
 
 #endif

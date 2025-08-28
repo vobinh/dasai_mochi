@@ -607,6 +607,7 @@ void saveSettings() {
   doc["soundEnabled"] = settings.soundEnabled;
   doc["volume"] = settings.volume;
   doc["musicAutoPlayNext"] = settings.musicAutoPlayNext;
+  doc["displayShape"] = (settings.displayShape == SHAPE_SQUARE) ? "square" : "round";
 
   // *** LƯU DANH SÁCH NHẠC VÀO JSON ***
   JsonArray tracks = doc.createNestedArray("trackList");
@@ -627,8 +628,9 @@ void saveSettings() {
   setting_vi["item5"] = "Âm thanh";
   setting_vi["item6"] = "Âm lượng";
   setting_vi["item7"] = "Tự Động Chuyển Bài";
-  setting_vi["item8"] = "Lưu";
-  setting_vi["item9"] = "Thoát";
+  setting_vi["item8"] = "Hình Dạng";
+  setting_vi["item9"] = "Lưu";
+  setting_vi["item10"] = "Thoát";
   JsonObject mode_vi = menu_vi.createNestedObject("mode");
   mode_vi["item0"] = "Chơi Flappy";
   mode_vi["item1"] = "Chơi Đua Xe";
@@ -650,8 +652,9 @@ void saveSettings() {
   setting_en["item5"] = "Sound Enabled";
   setting_en["item6"] = "Volume";
   setting_en["item7"] = "Auto Next";
-  setting_en["item8"] = "Save";
-  setting_en["item9"] = "Exit";
+  setting_en["item8"] = "Display Shape";
+  setting_en["item9"] = "Save";
+  setting_en["item10"] = "Exit";
   JsonObject mode_en = menu_en.createNestedObject("mode");
   mode_en["item0"] = "Play Flappy";
   mode_en["item1"] = "Play Car Game";
@@ -686,6 +689,8 @@ void loadSettings() {
       settings.soundEnabled = doc["soundEnabled"] | false;
       settings.volume = doc["volume"] | 10;
       settings.musicAutoPlayNext = doc["musicAutoPlayNext"] | true;
+      String shapeStr = doc["displayShape"] | "square";
+      settings.displayShape = (shapeStr == "round") ? SHAPE_ROUND : SHAPE_SQUARE;
 
       // *** TẢI DANH SÁCH NHẠC TỪ JSON ***
       JsonArray tracks = doc["trackList"];
@@ -712,6 +717,7 @@ void loadSettings() {
     settings.soundEnabled = false;
     settings.volume = 15;
     settings.musicAutoPlayNext = true;
+    settings.displayShape = SHAPE_SQUARE;
 
     audio_update_tracklist({});  // Tạo danh sách trống
 
@@ -728,8 +734,9 @@ void loadSettings() {
     setting_vi["item5"] = "Âm thanh";
     setting_vi["item6"] = "Âm lượng";
     setting_vi["item7"] = "Tự Động Chuyển Bài";
-    setting_vi["item8"] = "Lưu";
-    setting_vi["item9"] = "Thoát";
+    setting_vi["item8"] = "Hình Dạng";
+    setting_vi["item9"] = "Lưu";
+    setting_vi["item10"] = "Thoát";
     JsonObject mode_vi = default_doc.createNestedObject("mode");
     mode_vi["item0"] = "Chơi Flappy";
     mode_vi["item1"] = "Chơi Đua Xe";
@@ -751,8 +758,9 @@ void loadSettings() {
     setting_en["item5"] = "Sound Enabled";
     setting_en["item6"] = "Volume";
     setting_en["item7"] = "Auto Next";
-    setting_en["item8"] = "Save";
-    setting_en["item9"] = "Exit";
+    setting_en["item8"] = "Display Shape";
+    setting_en["item9"] = "Save";
+    setting_en["item10"] = "Exit";
     JsonObject mode_en = default_doc.createNestedObject("mode");
     mode_en["item0"] = "Play Flappy";
     mode_en["item1"] = "Play Car Game";

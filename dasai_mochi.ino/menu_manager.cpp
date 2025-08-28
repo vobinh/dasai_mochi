@@ -1,5 +1,6 @@
 #include "menu_manager.h"
 #include "ui_utils.h"
+#include <cmath>
 
 // =======================================================================================
 // --- BIẾN STATIC (CHỈ DÙNG TRONG FILE NÀY) ---
@@ -19,14 +20,15 @@ static enum EditMode {
     EDIT_MARQUEE_SPEED,
     EDIT_SOUND_ENABLED,
     EDIT_VOLUME,
-    EDIT_AUTOPLAY
+    EDIT_AUTOPLAY,
+    EDIT_DISPLAY_SHAPE
 } currentEditMode;
 
 static int selectedMenuItem = 0;
 static int menuScrollOffset = 0;
 static AppSettings temp_settings;
 
-static const int NUM_SETTING_ITEMS = 10;
+static const int NUM_SETTING_ITEMS = 11;
 static const int NUM_MODE_ITEMS = 7;
 static String settingMenuItems[NUM_SETTING_ITEMS];
 static String modeMenuItems[NUM_MODE_ITEMS];
@@ -36,15 +38,29 @@ static const int MAX_VISIBLE_ITEMS = 6;
 static bool save_was_triggered = false;
 static void draw_menu_internal();
 
+struct MenuItem {
+  String* items;
+  int num_items;
+};
+
+struct Menu {
+  MenuItem tabs[2];
+} menu;
+
 // =======================================================================================
 // --- TRIỂN KHAI CÁC HÀM (IMPLEMENTATION) ---
 // =======================================================================================
 
 void menu_init(TFT_eSPI* tft_ptr, TFT_eSprite* sprite_ptr, MakeFont* font_ptr, AppSettings* settings_ptr) {
-    tft = tft_ptr;
-    screenSprite = sprite_ptr;
-    myfont = font_ptr;
-    app_settings = settings_ptr;
+  tft = tft_ptr;
+  screenSprite = sprite_ptr;
+  myfont = font_ptr;
+  app_settings = settings_ptr;
+
+  menu.tabs[TAB_SETTING].items = settingMenuItems;
+  menu.tabs[TAB_SETTING].num_items = NUM_SETTING_ITEMS;
+  menu.tabs[TAB_MODE].items = modeMenuItems;
+  menu.tabs[TAB_MODE].num_items = NUM_MODE_ITEMS;
 }
 
 void menu_load_strings(const JsonObject& doc) {
@@ -62,13 +78,122 @@ void menu_load_strings(const JsonObject& doc) {
 }
 
 void menu_enter() {
-    currentEditMode = EDIT_NONE;
-    save_was_triggered = false; 
-    memcpy(&temp_settings, app_settings, sizeof(AppSettings));
+  currentTab = TAB_MODE;
+  currentEditMode = EDIT_NONE;
+  selectedMenuItem = 0;
+  menuScrollOffset = 0;
+  save_was_triggered = false;
+  temp_settings = *app_settings; 
+}
+
+bool menu_manager_save_triggered() {
+    return save_was_triggered;
+}
+
+static void draw_setting_value(int itemIndex, int x, int y, int w, uint16_t textColor, uint16_t bgColor) {
+    String valueStr = "";
+    switch (itemIndex) {
+        case 0: valueStr = String(temp_settings.frameDelay); break;
+        case 1: valueStr = String(temp_settings.currentRotation); break;
+        case 2: valueStr = temp_settings.currentLang; break;
+        case 3: valueStr = String(temp_settings.notificationTimeout) + "s"; break;
+        case 4: valueStr = String(temp_settings.marqueeSpeed); break;
+        case 5: valueStr = temp_settings.soundEnabled ? "ON" : "OFF"; break;
+        case 6: valueStr = String(temp_settings.volume); break;
+        case 7: valueStr = temp_settings.musicAutoPlayNext ? "ON" : "OFF"; break;
+        case 8: valueStr = (temp_settings.displayShape == SHAPE_SQUARE) ? "Vuong" : "Tron"; break;
+    }
+
+    if (valueStr.length() > 0) {
+        int textW = myfont->getLength(valueStr);
+        myfont->print(x + w - textW - 5, y, valueStr, textColor, bgColor);
+    }
+}
+
+static void draw_menu_internal() {
+    screenSprite->fillSprite(TFT_BLACK);
+    const int tabHeight = 30;
+    const int paddingY = 10;
+    const int itemHeight = 25;
+    const int startY = tabHeight + paddingY;
+    const int screen_center_x = tft->width() / 2;
+    const int screen_radius = tft->width() / 2;
+
+    // Vẽ các tab
+    for (int i = 0; i < 2; i++) {
+        int tabWidth = tft->width() / 2;
+        int tabX = i * tabWidth;
+        uint16_t bgColor = (i == currentTab) ? TFT_DARKCYAN : TFT_DARKGREY;
+        uint16_t textColor = (i == currentTab) ? TFT_WHITE : TFT_LIGHTGREY;
+
+        if (temp_settings.displayShape == SHAPE_ROUND) {
+            // Vẽ tab cong cho màn hình tròn
+            for(int y_line = 0; y_line < tabHeight; y_line++) {
+                int d = abs(screen_radius - y_line);
+                int w = sqrt(screen_radius * screen_radius - d * d);
+                int x_start = screen_center_x - w;
+                int x_end = screen_center_x + w;
+                screenSprite->drawFastHLine(x_start, y_line, x_end - x_start, bgColor);
+            }
+        } else {
+            screenSprite->fillRect(tabX, 0, tabWidth, tabHeight, bgColor);
+        }
+        
+        int textW = myfont->getLength(tabNames[i]);
+        myfont->print(tabX + (tabWidth - textW) / 2, 8, tabNames[i], textColor, bgColor);
+    }
+
+    // Vẽ danh sách các mục
+    MenuItem currentList = menu.tabs[currentTab];
+    int numItems = currentList.num_items;
+    
+    for (int i = 0; i < MAX_VISIBLE_ITEMS; i++) {
+        int itemIndex = menuScrollOffset + i;
+        if (itemIndex >= numItems) break;
+
+        int currentY = startY + i * (itemHeight + 5);
+        bool isSelected = (itemIndex == selectedMenuItem);
+        uint16_t bgColor = isSelected ? TFT_BLUE : TFT_BLACK;
+        uint16_t textColor = isSelected ? TFT_WHITE : TFT_LIGHTGREY;
+        
+        if (currentEditMode != EDIT_NONE && isSelected) {
+             bgColor = TFT_RED;
+        }
+
+        int itemX = 5;
+        int itemW = tft->width() - 10;
+
+        // *** BẮT ĐẦU THAY ĐỔI: Tính toán lại X và Width cho màn hình tròn ***
+        if (temp_settings.displayShape == SHAPE_ROUND) {
+            int itemCenterY = currentY + (itemHeight / 2);
+            int d = abs(screen_radius - itemCenterY);
+            if (d < screen_radius) { // Chỉ vẽ nếu mục nằm trong vòng tròn
+                int w_half = sqrt(screen_radius * screen_radius - d * d) - 10; // trừ padding
+                itemW = w_half * 2;
+                itemX = screen_center_x - w_half;
+            } else {
+                itemW = 0; // Không vẽ mục này
+            }
+        }
+        // *** KẾT THÚC THAY ĐỔI ***
+
+        if (itemW > 0) {
+            screenSprite->fillRoundRect(itemX, currentY - 4, itemW, itemHeight + 2, 5, bgColor);
+            
+            String title = currentList.items[itemIndex];
+            int titleMaxWidth = (currentTab == TAB_SETTING) ? itemW * 0.6 : itemW - 10;
+            drawMarqueeText(screenSprite, myfont, title, itemX + 5, currentY, titleMaxWidth, textColor, bgColor, isSelected, temp_settings.marqueeSpeed);
+
+            if (currentTab == TAB_SETTING) {
+                draw_setting_value(itemIndex, itemX, currentY, itemW, textColor, bgColor);
+            }
+        }
+    }
 }
 
 void menu_draw() {
     draw_menu_internal();
+    screenSprite->pushSprite(0, 0);
 }
 
 Mode menu_handle_action(ButtonAction action) {
@@ -108,6 +233,9 @@ Mode menu_handle_action(ButtonAction action) {
                 case EDIT_AUTOPLAY:
                     temp_settings.musicAutoPlayNext = !temp_settings.musicAutoPlayNext;
                     break;
+                case EDIT_DISPLAY_SHAPE:
+                    temp_settings.displayShape = (temp_settings.displayShape == SHAPE_SQUARE) ? SHAPE_ROUND : SHAPE_SQUARE;
+                    break;
                 default: break;
             }
         } else if (action == ACTION_LONG) {
@@ -140,11 +268,12 @@ Mode menu_handle_action(ButtonAction action) {
                     case 5: currentEditMode = EDIT_SOUND_ENABLED; break;
                     case 6: currentEditMode = EDIT_VOLUME; break;
                     case 7: currentEditMode = EDIT_AUTOPLAY; break;
-                    case 8: // Save
-                        memcpy(app_settings, &temp_settings, sizeof(AppSettings));
+                    case 8: currentEditMode = EDIT_DISPLAY_SHAPE; break;
+                    case 9: // Save
                         save_was_triggered = true;
-                        return PLAYING;
-                    case 9: // Exit
+                        *app_settings = temp_settings;
+                        return PLAYING; 
+                    case 10: // Exit
                         save_was_triggered = false;
                         return PLAYING;
                 }
@@ -171,109 +300,4 @@ String menu_manager_get_temp_lang() {
 
 int menu_manager_get_temp_rotation() {
     return temp_settings.currentRotation;
-}
-
-bool menu_manager_save_triggered() {
-    return save_was_triggered;
-}
-
-static void draw_menu_internal() {
-  screenSprite->fillSprite(TFT_BLACK);
-
-  const int paddingX = 10;
-  const int itemHeight = 28;
-  const int cornerRadius = 5;
-  const int tabHeight = 30;
-  const int tabWidth = tft->width() / 2;
-  const int scrollbarWidth = 6;
-
-  if (currentTab == TAB_SETTING) {
-    screenSprite->fillRoundRect(0, 0, tabWidth, tabHeight, cornerRadius, TFT_BLUE);
-    screenSprite->drawRoundRect(tabWidth, 0, tabWidth, tabHeight, cornerRadius, TFT_WHITE);
-  } else {
-    screenSprite->drawRoundRect(0, 0, tabWidth, tabHeight, cornerRadius, TFT_WHITE);
-    screenSprite->fillRoundRect(tabWidth, 0, tabWidth, tabHeight, cornerRadius, TFT_BLUE);
-  }
-  myfont->print((tabWidth - myfont->getLength(tabNames[0])) / 2, (tabHeight - 16) / 2, tabNames[0], TFT_WHITE, (currentTab == TAB_SETTING) ? TFT_BLUE : TFT_BLACK);
-  myfont->print(tabWidth + (tabWidth - myfont->getLength(tabNames[1])) / 2, (tabHeight - 16) / 2, tabNames[1], TFT_WHITE, (currentTab == TAB_MODE) ? TFT_BLUE : TFT_BLACK);
-
-  String* currentMenuItems = (currentTab == TAB_SETTING) ? settingMenuItems : modeMenuItems;
-  int numCurrentItems = (currentTab == TAB_SETTING) ? NUM_SETTING_ITEMS : NUM_MODE_ITEMS;
-  
-  int itemToHighlight = -1;
-  if (currentTab == TAB_SETTING) {
-    if (currentEditMode == EDIT_SPEED) itemToHighlight = 0;
-    if (currentEditMode == EDIT_ROTATION) itemToHighlight = 1;
-    if (currentEditMode == EDIT_LANGUAGE) itemToHighlight = 2;
-    if (currentEditMode == EDIT_NOTIF_TIME) itemToHighlight = 3;
-    if (currentEditMode == EDIT_MARQUEE_SPEED) itemToHighlight = 4;
-    if (currentEditMode == EDIT_SOUND_ENABLED) itemToHighlight = 5;
-    if (currentEditMode == EDIT_VOLUME) itemToHighlight = 6;
-    if (currentEditMode == EDIT_AUTOPLAY) itemToHighlight = 7;
-  }
-
-  int startItem = menuScrollOffset;
-  int endItem = min(startItem + MAX_VISIBLE_ITEMS, numCurrentItems);
-
-  for (int i = startItem; i < endItem; i++) {
-    int displayIndex = i - menuScrollOffset;
-    int currentY = tabHeight + 10 + displayIndex * (itemHeight + 5);
-    uint16_t textColor = TFT_WHITE;
-    uint16_t bgColor = TFT_BLACK;
-
-    bool isSelected = (i == selectedMenuItem && currentEditMode == EDIT_NONE);
-
-    if (isSelected) {
-      screenSprite->drawRoundRect(paddingX / 2, currentY - 4, tft->width() - paddingX - scrollbarWidth - 5, itemHeight, cornerRadius, TFT_WHITE);
-    }
-    if (i == itemToHighlight) {
-      screenSprite->fillRoundRect(paddingX / 2, currentY - 4, tft->width() - paddingX - scrollbarWidth - 5, itemHeight, cornerRadius, TFT_WHITE);
-      textColor = TFT_BLACK;
-      bgColor = TFT_WHITE;
-    }
-
-    String title = currentMenuItems[i];
-    String valueStr = "";
-    if (currentTab == TAB_SETTING) {
-      if (i == 0) valueStr = String(temp_settings.frameDelay);
-      if (i == 1) valueStr = String(temp_settings.currentRotation*90) + " deg";
-      if (i == 2) valueStr = (temp_settings.currentLang == "vi") ? "VI" : "EN";
-      if (i == 3) valueStr = String(temp_settings.notificationTimeout) + "s";
-      if (i == 4) valueStr = String(temp_settings.marqueeSpeed);
-      if (i == 5) valueStr = temp_settings.soundEnabled ? "ON" : "OFF";
-      if (i == 6) valueStr = String(temp_settings.volume);
-      if (i == 7) valueStr = temp_settings.musicAutoPlayNext ? "ON" : "OFF";
-    }
-
-    int totalAvailableWidth = tft->width() - paddingX * 2 - scrollbarWidth - 10;
-    int titleDrawWidth;
-
-    if (currentTab == TAB_SETTING && valueStr.length() > 0) {
-        int valueWidth = myfont->getLength(valueStr);
-        titleDrawWidth = totalAvailableWidth - valueWidth - 10;
-    } else {
-        titleDrawWidth = totalAvailableWidth;
-    }
-    
-    // *** TRUYỀN TỐC ĐỘ VÀO HÀM VẼ ***
-    drawMarqueeText(screenSprite, myfont, title, paddingX + 5, currentY, titleDrawWidth, textColor, bgColor, isSelected, temp_settings.marqueeSpeed);
-
-    if (valueStr.length() > 0) {
-      int textW = myfont->getLength(valueStr);
-      myfont->print(tft->width() - textW - paddingX - scrollbarWidth - 5, currentY, valueStr, textColor, bgColor);
-    }
-  }
-
-  if (numCurrentItems > MAX_VISIBLE_ITEMS) {
-    int menuHeight = tft->height() - tabHeight - 10;
-    int scrollbarX = tft->width() - scrollbarWidth - 2;
-    
-    screenSprite->drawRect(scrollbarX, tabHeight + 5, scrollbarWidth, menuHeight, TFT_DARKGREY);
-    
-    float thumbHeight = (float)MAX_VISIBLE_ITEMS / numCurrentItems * menuHeight;
-    float thumbY = tabHeight + 5 + ((float)menuScrollOffset / numCurrentItems * menuHeight);
-    screenSprite->fillRoundRect(scrollbarX, thumbY, scrollbarWidth, thumbHeight, 2, TFT_WHITE);
-  }
-  
-  screenSprite->pushSprite(0, 0);
 }
