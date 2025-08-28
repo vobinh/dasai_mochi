@@ -23,6 +23,11 @@ enum Mode {
   MUSIC_PLAYER_MODE
 };
 
+enum OperatingSystem {
+  OS_ANDROID,
+  OS_IOS
+};
+
 struct AppSettings {
   int frameDelay;
   int currentRotation;
@@ -33,6 +38,7 @@ struct AppSettings {
   bool soundEnabled; // *** BIẾN MỚI: Bật/tắt âm thanh ***
   int volume;        // *** BIẾN MỚI: Mức âm lượng (0-30) ***
   bool musicAutoPlayNext;
+  OperatingSystem osMode; // *** BIẾN MỚI: Lưu chế độ OS đã chọn ***
 };
 
 #endif

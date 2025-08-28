@@ -3,6 +3,7 @@
 #include <vector>
 #include <time.h>
 #include "ui_utils.h"
+#include "ancs_manager.h"
 
 // --- CÁC BIẾN TĨNH ---
 static TFT_eSPI *_tft;
@@ -35,6 +36,9 @@ static uint16_t rtc_year;
 // *** BIẾN MỚI ĐỂ LƯU DỮ LIỆU THỜI TIẾT ***
 static WeatherData latestWeather;
 static bool hasWeatherData = false;
+
+// Cấu trúc để truyền con trỏ trạng thái cho ancs_manager
+static BleSharedState sharedState;
 
 // --- CÁC HÀM NỘI BỘ ---
 static void syncTimeToRTC()
@@ -196,16 +200,35 @@ void chronos_init(TFT_eSPI *tft, TFT_eSprite *sprite, MakeFont *font, AppSetting
     _sprite = sprite;
     _font = font;
     _settings = settings;
-    Chronos.setConnectionCallback(connectionCallback);
-    Chronos.setNotificationCallback(notificationCallback);
-    Chronos.setRingerCallback(ringerCallback);
-    Chronos.setConfigurationCallback(configCallback);
-    Chronos.begin();
+    Serial.println("_settings->osMode");
+    Serial.println(_settings->osMode);
+    if (_settings->osMode == OS_ANDROID) {
+        Serial.println("Initializing Chronos for Android...");
+        Chronos.setConnectionCallback(connectionCallback);
+        Chronos.setNotificationCallback(notificationCallback);
+        Chronos.setRingerCallback(ringerCallback);
+        Chronos.setConfigurationCallback(configCallback);
+        Chronos.begin();
+    } else {
+        // Chuẩn bị các con trỏ để chia sẻ trạng thái
+        sharedState.isConnected = &isConnected;
+        sharedState.isRinging = &isRinging;
+        sharedState.hasNewNotification = &hasNewNotification;
+        sharedState.callerInfo = &callerInfo;
+        sharedState.latestNotification = &latestNotification;
+        
+        // Gọi hàm khởi tạo của module ANCS
+        ancs_init(_settings, &sharedState);
+    }
 }
 
 void chronos_loop()
 {
-    Chronos.loop();
+    if (_settings->osMode == OS_ANDROID) {
+        Chronos.loop();
+    } else {
+        ancs_loop();
+    }
     getTimeFromRTC();
 }
 

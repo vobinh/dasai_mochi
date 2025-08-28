@@ -17,6 +17,7 @@ static enum EditMode {
     EDIT_LANGUAGE, 
     EDIT_NOTIF_TIME,
     EDIT_MARQUEE_SPEED,
+    EDIT_OS_MODE,
     EDIT_SOUND_ENABLED,
     EDIT_VOLUME,
     EDIT_AUTOPLAY
@@ -26,7 +27,7 @@ static int selectedMenuItem = 0;
 static int menuScrollOffset = 0;
 static AppSettings temp_settings;
 
-static const int NUM_SETTING_ITEMS = 10;
+static const int NUM_SETTING_ITEMS = 11;
 static const int NUM_MODE_ITEMS = 7;
 static String settingMenuItems[NUM_SETTING_ITEMS];
 static String modeMenuItems[NUM_MODE_ITEMS];
@@ -108,6 +109,9 @@ Mode menu_handle_action(ButtonAction action) {
                 case EDIT_AUTOPLAY:
                     temp_settings.musicAutoPlayNext = !temp_settings.musicAutoPlayNext;
                     break;
+                case EDIT_OS_MODE:
+                    temp_settings.osMode = (temp_settings.osMode == OS_ANDROID) ? OS_IOS :OS_ANDROID;
+                    break;
                 default: break;
             }
         } else if (action == ACTION_LONG) {
@@ -140,11 +144,12 @@ Mode menu_handle_action(ButtonAction action) {
                     case 5: currentEditMode = EDIT_SOUND_ENABLED; break;
                     case 6: currentEditMode = EDIT_VOLUME; break;
                     case 7: currentEditMode = EDIT_AUTOPLAY; break;
-                    case 8: // Save
+                    case 8: currentEditMode = EDIT_OS_MODE; break;
+                    case 9: // Save
                         memcpy(app_settings, &temp_settings, sizeof(AppSettings));
                         save_was_triggered = true;
                         return PLAYING;
-                    case 9: // Exit
+                    case 10: // Exit
                         save_was_triggered = false;
                         return PLAYING;
                 }
@@ -210,6 +215,7 @@ static void draw_menu_internal() {
     if (currentEditMode == EDIT_SOUND_ENABLED) itemToHighlight = 5;
     if (currentEditMode == EDIT_VOLUME) itemToHighlight = 6;
     if (currentEditMode == EDIT_AUTOPLAY) itemToHighlight = 7;
+    if (currentEditMode == EDIT_OS_MODE) itemToHighlight = 8;
   }
 
   int startItem = menuScrollOffset;
@@ -243,6 +249,7 @@ static void draw_menu_internal() {
       if (i == 5) valueStr = temp_settings.soundEnabled ? "ON" : "OFF";
       if (i == 6) valueStr = String(temp_settings.volume);
       if (i == 7) valueStr = temp_settings.musicAutoPlayNext ? "ON" : "OFF";
+      if (i == 8) valueStr = (temp_settings.osMode == OS_ANDROID) ? "Android" : "iOS";
     }
 
     int totalAvailableWidth = tft->width() - paddingX * 2 - scrollbarWidth - 10;
