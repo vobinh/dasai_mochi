@@ -3,6 +3,7 @@
 #include <vector>
 #include <time.h>
 #include "ui_utils.h"
+#include "audio_manager.h"
 
 // --- CÁC BIẾN TĨNH ---
 static TFT_eSPI *_tft;
@@ -35,6 +36,7 @@ static uint16_t rtc_year;
 // *** BIẾN MỚI ĐỂ LƯU DỮ LIỆU THỜI TIẾT ***
 static WeatherData latestWeather;
 static bool hasWeatherData = false;
+static ChronosAction requested_action = CHRONOS_ACTION_NONE;
 
 // --- CÁC HÀM NỘI BỘ ---
 static void syncTimeToRTC()
@@ -122,10 +124,36 @@ static void ringerCallback(String caller, bool state)
 }
 static void notificationCallback(Notification notification)
 {
+    if (notification.title == "set_text") {
+      _settings->scrollText.text = notification.message;
+      requested_action = CHRONOS_ACTION_SAVE_SETTINGS;
+      return; // Không hiển thị thông báo này
+    } 
+    else if (notification.title == "set_tracks") {
+      String trackNamesStr = notification.message;
+      std::vector<String> newTrackList;
+      int lastComma = -1;
+      for (int i = 0; i < trackNamesStr.length(); i++) {
+        if (trackNamesStr.charAt(i) == ',') {
+          newTrackList.push_back(trackNamesStr.substring(lastComma + 1, i));
+          lastComma = i;
+        }
+      }
+      newTrackList.push_back(trackNamesStr.substring(lastComma + 1));
+
+      audio_update_tracklist(newTrackList);
+      requested_action = CHRONOS_ACTION_SAVE_SETTINGS;
+      return; // Không hiển thị thông báo này
+    }
+    else if (notification.title == "reset_config") {
+      requested_action = CHRONOS_ACTION_RESET_CONFIG;
+      return; // Không hiển thị thông báo này
+    }
+
     latestNotification = notification;
     hasNewNotification = true;
     hasNewNavigation = false;
-    wrapMessage(latestNotification.title + "\n" + latestNotification.message);
+    wrapMessage(latestNotification.message);
 
     notificationStartTime = millis();
     lastMessageScrollTime = millis();
@@ -343,13 +371,21 @@ bool chronos_draw_alerts()
         }
 
         _sprite->fillSprite(TFT_BLACK);
-        const int boxX = 5, boxY = 10, boxW = 230, boxH = 200, cornerRadius = 10;
+        const int boxX = 5, boxY = 30, boxW = 230, boxH = 180, cornerRadius = 10;
         const int textPadding = 8, scrollbarWidth = 6;
         const int lineHeight = 22;
 
         _sprite->drawRoundRect(boxX, boxY, boxW, boxH, cornerRadius, TFT_CYAN);
+
+        String title = latestNotification.title;
         String appName = latestNotification.app;
-        _font->print(_tft->width() - _font->getLength(appName) - 15, _tft->height() - 30, appName, TFT_CYAN, TFT_BLACK);
+        if(_settings->displayShape == SHAPE_ROUND) {
+            _font->print((_tft->width() - _font->getLength(title)) / 2, 4, title, TFT_CYAN, TFT_BLACK);
+            _font->print((_tft->width() - _font->getLength(appName)) / 2, _tft->height() - 23, appName, TFT_CYAN, TFT_BLACK);
+        } else {
+            _font->print(15, 4, title, TFT_CYAN, TFT_BLACK);
+            _font->print(_tft->width() - _font->getLength(appName) - 15, _tft->height() - 23, appName, TFT_CYAN, TFT_BLACK);
+        }
 
         for (int i = 0; i < maxLines; i++)
         {
@@ -399,4 +435,10 @@ bool chronos_has_weather_data()
 WeatherData chronos_get_weather()
 {
     return latestWeather;
+}
+
+ChronosAction chronos_get_requested_action() {
+    ChronosAction action = requested_action;
+    requested_action = CHRONOS_ACTION_NONE; // Reset lại sau khi đã lấy
+    return action;
 }

@@ -10,6 +10,7 @@ const uint32_t PROGMEM UTF8_table[] =
 {
 /*add_here1*/
 
+
 0x00000020, // 
 0x0000C380, //À
 0x0000C381, //Á
@@ -240,12 +241,9 @@ const uint32_t PROGMEM UTF8_table[] =
 0x00E1BBB7, //ỷ
 0x00E1BBB9, //ỹ
 0x00E1BBB5, //ỵ
-0x00E4BDA0, //你
-0x00E5A5BD, //好
-0x00E69C8B, //朋
-0x00E58F8B, //友
-0x00E29DA4, //❤
 0x0000C2B0, //°
+0x00E28693, //↓
+0x00E28691, //↑
 
 //data_add_xxx
 };

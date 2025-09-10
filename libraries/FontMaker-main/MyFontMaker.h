@@ -46,6 +46,7 @@ extern const MyFont_typedef F16;
 extern const MyFont_typedef TimeNewRoMan18;
 extern const MyFont_typedef VN;
 extern const MyFont_typedef Fira_Code_16;
+extern const MyFont_typedef Fira_Code_16_2;
 //auto add here
 
 

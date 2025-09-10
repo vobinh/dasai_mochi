@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<title>TrueType → GFX (.h) + Map (UTF-8) – có danh sách ký tự</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/opentype.js/1.3.4/opentype.min.js"></script>
+<style>
+  body{font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, "Helvetica Neue", Arial, "Noto Sans";}
+  .loader{border:4px solid #eee;border-top:4px solid #6366f1;border-radius:50%;width:32px;height:32px;animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  textarea{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New", monospace;}
+  code{background:#f3f4f6;padding:0 4px;border-radius:4px}
+</style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+<div class="max-w-6xl mx-auto p-4 md:p-8">
+  <h1 class="text-2xl md:text-3xl font-bold mb-1">TrueType → GFX FreeFont (.h) + Map UTF-8</h1>
+  <p class="text-gray-600 mb-6">Giống truetype2gfx nhưng có **ô dán/nhập ký tự**. Xuất <code>Namept7b.h</code> + <code>Name_map.h</code>. Hỗ trợ **tiếng Việt**.</p>
+
+  <div class="bg-white rounded-2xl shadow p-6 space-y-6">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium mb-1">1) Chọn TTF/OTF</label>
+          <label class="w-full flex items-center px-4 py-2 bg-white text-indigo-600 rounded-lg shadow border border-indigo-600 cursor-pointer hover:bg-indigo-600 hover:text-white transition">
+            <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20"><path d="M16.88 9.1A4 4 0 0 1 16 17H5a5 5 0 0 1-1-9.9V7a3 3 0 0 1 4.52-2.59A4.98 4.98 0 0 1 17 8c0 .38-.04.74-.12 1.1zM11 11h3l-4 4-4-4h3v-4h2v4z"/></svg>
+            <span id="fileLabel" class="text-sm font-medium">Chọn file...</span>
+            <input id="fontFile" type="file" accept=".ttf,.otf" class="hidden" />
+          </label>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium mb-1">2) Tên font (không dấu/khoảng)</label>
+          <input id="fontName" type="text" value="ArialVN_24"
+                 class="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          <p class="text-xs text-gray-500 mt-1">Sẽ tạo <code>ArialVN_24pt7b.h</code> và <code>ArialVN_24_map.h</code>.</p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium mb-1">3) Cỡ chữ (px)</label>
+            <input id="fontPx" type="number" value="24" min="6" max="200"
+                   class="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">4) First code</label>
+            <input id="firstCode" type="number" value="32" min="0" max="255"
+                   class="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            <p class="text-[11px] text-gray-500 mt-1">Đặt 32 để giữ ASCII in trực tiếp; đặt 1 để “full” (mọi chuỗi in bằng <code>tft_printVN</code>).</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium mb-1">5) Ngưỡng binarize (0-255)</label>
+            <input id="threshold" type="number" value="128" min="0" max="255"
+                   class="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </div>
+          <div class="flex items-end">
+            <label class="inline-flex items-center gap-2">
+              <input id="addAscii" type="checkbox" class="h-4 w-4" checked />
+              <span class="text-sm">Thêm ASCII 0x20–0x7E</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex flex-col">
+        <label class="block text-sm font-medium mb-1">6) Danh sách ký tự (dán/nhập)</label>
+        <textarea id="charBox" rows="10"
+                  class="flex-1 w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500">AĂÂBCDĐEÊFGHIJKLMNOÔƠPQRSTUƯVWXYZ
+aăâbcdđeêfghijklmnoôơpqrstuưvwxyz
+àáâãăạảấầẩẫậắằẳẵặèéẹẻẽêềếểễệìíịỉĩ
+òóôõơọỏồốổỗộờớởỡợùúụủũưừứửữự
+ỳýỵỷỹ ₫</textarea>
+        <p class="text-xs text-gray-500 mt-1">Ký tự trùng sẽ tự loại bỏ. Có preset bên dưới.</p>
+        <div class="mt-2 flex flex-wrap gap-2">
+          <button id="presetAscii"  class="px-3 py-1.5 text-sm rounded border hover:bg-gray-100">ASCII</button>
+          <button id="presetVNCore" class="px-3 py-1.5 text-sm rounded border hover:bg-gray-100">Việt cơ bản</button>
+          <button id="presetVNFull" class="px-3 py-1.5 text-sm rounded border hover:bg-gray-100">Việt full</button>
+          <button id="presetClear"  class="px-3 py-1.5 text-sm rounded border hover:bg-gray-100">Xoá</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="text-center">
+      <button id="btnMake" class="px-6 py-3 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+        Tạo .h + _map.h
+      </button>
+    </div>
+
+    <div id="busy" class="hidden flex items-center justify-center gap-3 text-gray-600 mt-3">
+      <div class="loader"></div><span>Đang xử lý…</span>
+    </div>
+
+    <div id="report" class="hidden bg-gray-50 border rounded-lg p-4 text-sm mt-4">
+      <div><b>Kết quả:</b> <span id="repMsg"></span></div>
+      <div class="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2">
+        <div>Glyphs: <b id="repGlyphs">0</b></div>
+        <div>first..last: <b id="repFL">–</b></div>
+        <div>yAdvance: <b id="repYA">0</b></div>
+        <div>Bitmaps bytes: <b id="repBB">0</b></div>
+      </div>
+      <p class="mt-2 text-gray-500">
+        Include 2 file vào project. In ASCII có thể dùng <code>tft.print()</code> (nếu giữ ASCII),
+        còn chuỗi UTF-8 dùng <code>tft_printVN(tft, "...")</code> từ <code>_map.h</code>.
+      </p>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== UI =====
+const fontFile  = document.getElementById('fontFile');
+const fileLabel = document.getElementById('fileLabel');
+const fontName  = document.getElementById('fontName');
+const fontPx    = document.getElementById('fontPx');
+const firstCode = document.getElementById('firstCode');
+const threshold = document.getElementById('threshold');
+const addAscii  = document.getElementById('addAscii');
+const charBox   = document.getElementById('charBox');
+const btnMake   = document.getElementById('btnMake');
+const busy      = document.getElementById('busy');
+const report    = document.getElementById('report');
+const repMsg    = document.getElementById('repMsg');
+const repGlyphs = document.getElementById('repGlyphs');
+const repFL     = document.getElementById('repFL');
+const repYA     = document.getElementById('repYA');
+const repBB     = document.getElementById('repBB');
+
+const presetAscii  = document.getElementById('presetAscii');
+const presetVNCore = document.getElementById('presetVNCore');
+const presetVNFull = document.getElementById('presetVNFull');
+const presetClear  = document.getElementById('presetClear');
+
+fontFile.addEventListener('change', ()=>{ fileLabel.textContent = fontFile.files?.[0]?.name || 'Chọn file...'; });
+
+// Presets
+const ASCII = (()=>{let s=''; for(let c=0x20;c<=0x7E;c++) s+=String.fromCharCode(c); return s;})();
+const VN_BASIC = (
+  "AĂÂBCDĐEÊFGHIJKLMNOÔƠPQRSTUƯVWXYZ\n" +
+  "aăâbcdđeêfghijklmnoôơpqrstuưvwxyz\n" +
+  "àáâãăạảấầẩẫậắằẳẵặèéẹẻẽêềếểễệìíịỉĩ\n" +
+  "òóôõơọỏồốổỗộờớởỡợùúụủũưừứửữự\n"  +
+  "ỳýỵỷỹ ₫"
+);
+const VN_FULL_RANGES = [
+  [0x0020,0x007E],[0x00A0,0x00FF],
+  [0x0102,0x0103],[0x0110,0x0111],
+  [0x01A0,0x01A1],[0x01AF,0x01B0],
+  [0x1EA0,0x1EF9],[0x20AB,0x20AB]
+];
+function buildFromRanges(ranges){
+  const set=new Set();
+  for(const [a,b] of ranges){ for(let u=a;u<=b;u++){ if(u<=0xFFFF) set.add(u); } }
+  return Array.from(set).sort((x,y)=>x-y).map(u=>String.fromCharCode(u)).join('');
+}
+presetAscii.onclick  = ()=>{ charBox.value = ASCII; };
+presetVNCore.onclick = ()=>{ charBox.value = ASCII + "\n" + VN_BASIC; };
+presetVNFull.onclick = ()=>{ charBox.value = buildFromRanges(VN_FULL_RANGES); };
+presetClear.onclick  = ()=>{ charBox.value = ""; };
+
+// Helpers
+function sanitizeName(s){ return (s||'ArialVN_24').replace(/\W+/g,'_'); }
+function toHexLines(arr, per=16){ let out=''; for(let i=0;i<arr.length;i++){ out+='0x'+(arr[i]&0xFF).toString(16).padStart(2,'0')+((i%per===per-1)?',\n  ' : ', ');} return out.replace(/, $/,''); }
+function downloadText(name, text){
+  const blob = new Blob([text], {type:'text/plain;charset=utf-8'}); const a=document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; a.click(); URL.revokeObjectURL(a.href);
+}
+
+// Core: make GFX .h + map
+function buildGFX(font, px, first, thr, wantAscii, rawChars, outName){
+  const scale = px / font.unitsPerEm;
+  const ascent  = Math.ceil(font.ascender  * scale);
+  const descent = Math.ceil(-font.descender * scale);
+  const yAdvance = ascent + descent;
+
+  // Build character set (unique, giữ thứ tự nhập)
+  const seen = new Set(); const chars = [];
+  if (wantAscii) {
+    for(let c=0x20;c<=0x7E;c++){ const ch=String.fromCharCode(c); if(!seen.has(ch)){ seen.add(ch); chars.push(ch);} }
+  }
+  for(const ch of (rawChars||'')){
+    if (ch==='\r'||ch==='\n'||ch==='\t') continue;
+    if (!seen.has(ch)) { seen.add(ch); chars.push(ch); }
+  }
+  if (chars.length === 0) throw new Error("Danh sách ký tự trống.");
+
+  // Kiểm tra trần 8-bit
+  const maxGlyphs = 256 - first;
+  if (chars.length > maxGlyphs) {
+    throw new Error(`Quá số glyph 8-bit. First=${first} → tối đa ${maxGlyphs} glyph, bạn đang yêu cầu ${chars.length}.`);
+  }
+
+  // Tạo mapping: (unicode, code) rồi sort theo unicode để map header dùng binary search
+  let code = first;
+  const pairs = [];
+  for (const ch of chars) { pairs.push([ch.codePointAt(0), code++]); }
+  pairs.sort((a,b)=>a[0]-b[0]); // theo Unicode tăng dần
+  const mapping = pairs; // [ [uni, code], ... ]
+  const firstCodeUsed = mapping[0][1];
+  const lastCodeUsed  = mapping[mapping.length-1][1];
+
+  // Render & pack
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently:true });
+
+  // Chúng ta cần mảng glyph theo code tăng dần để build bảng Glyphs liên tục first..last
+  const byCode = new Map(mapping.map(([u,c])=>[c,u]));
+  const bitmaps = [];   // concatenated bytes
+  const glyphLines = []; // GFXglyph lines
+  let bitmapOffset = 0;
+  let bitmapsBytesCount = 0;
+
+  function packGlyph(w,h,imgData){
+    // Pack 1bpp MSB-first, pad TỪNG DÒNG tới biên byte
+    const lineBytes = Math.ceil(w/8);
+    const out = [];
+    for (let y=0; y<h; y++){
+      let B=0, b=7;
+      for (let x=0; x<w; x++){
+        const a = imgData[(y*w + x)*4 + 3];
+        if (a > thr) B |= (1<<b);
+        b--;
+        if (b<0){ out.push(B); B=0; b=7; }
+      }
+      if (b!==7) out.push(B);
+    }
+    return out;
+  }
+
+  // Duyệt code từ first..last, tạo glyph entry (nếu không có char thì để glyph trống)
+  for (let c = firstCodeUsed; c <= lastCodeUsed; c++){
+    const u = byCode.get(c);
+    if (u === undefined){
+      // glyph rỗng
+      glyphLines.push(`  { ${bitmapOffset}, 0, 0, 0, 0, 0 },`);
+      continue;
+    }
+    const ch = String.fromCharCode(u);
+    const g = font.charToGlyph(ch);
+    const path = g.getPath(0, 0, px);
+    const box = path.getBoundingBox(); // y2: top, y1: bottom
+    const w = Math.max(0, Math.ceil(box.x2) - Math.floor(box.x1));
+    const h = Math.max(0, Math.ceil(box.y2) - Math.floor(box.y1));
+    const xAdvance = Math.round(g.advanceWidth * scale);
+    const xOffset  = Math.floor(box.x1);
+    const yOffset  = 1 - Math.ceil(box.y2);
+
+    let added = 0;
+    if (w>0 && h>0){
+      canvas.width = w; canvas.height = h; ctx.clearRect(0,0,w,h);
+      g.getPath(-box.x1, -box.y1, px).draw(ctx);
+      const img = ctx.getImageData(0,0,w,h).data;
+      const packed = packGlyph(w,h,img);
+      bitmaps.push(...packed);
+      added = packed.length;
+    }
+    glyphLines.push(`  { ${bitmapOffset}, ${w}, ${h}, ${xAdvance}, ${xOffset}, ${yOffset} },`);
+    bitmapOffset += added;
+    bitmapsBytesCount += added;
+  }
+
+  // Build .h content
+  const baseName = sanitizeName(outName);
+  const fontVar  = `${baseName}pt7b`;
+  const guard    = `_${baseName.toUpperCase()}PT7B_H_`;
+
+  let bitmapsStr = toHexLines(bitmaps);
+  if (!bitmapsStr) bitmapsStr = '0x00';
+
+  const headerH =
+`#ifndef ${guard}
+#define ${guard}
+
+#include <stdint.h>
+#if __has_include(<gfxfont.h>)
+  #include <gfxfont.h>
+#else
+  #include <Fonts/GFXFF/gfxfont.h>
+#endif
+
+const uint8_t ${fontVar}Bitmaps[] PROGMEM = {
+  ${bitmapsStr}
+};
+
+const GFXglyph ${fontVar}Glyphs[] PROGMEM = {
+${glyphLines.join('\n')}
+};
+
+const GFXfont ${baseName}pt7b PROGMEM = {
+  (uint8_t*)${fontVar}Bitmaps,
+  (GFXglyph*)${fontVar}Glyphs,
+  ${firstCodeUsed}, ${lastCodeUsed}, ${yAdvance}
+};
+
+#endif // ${guard}
+`;
+
+  // Build _map.h
+  const mapGuard = `_${baseName.toUpperCase()}_MAP_H_`;
+  const pairsStr = mapping.map(([u,c])=>`{0x${u.toString(16).toUpperCase().padStart(4,'0')}, ${c}}`).join(',\n  ');
+
+  const mapH =
+`#ifndef ${mapGuard}
+#define ${mapGuard}
+
+#include <Arduino.h>
+#include <TFT_eSPI.h>
+
+typedef struct { uint16_t uni; uint8_t code; } VNMap;
+
+static const VNMap ${baseName}_map[] PROGMEM = {
+  ${pairsStr}
+};
+static const size_t ${baseName}_map_size = sizeof(${baseName}_map)/sizeof(${baseName}_map[0]);
+
+static bool mapUnicodeToCode(uint32_t uni, uint8_t &codeOut){
+  size_t lo=0, hi=${baseName}_map_size;
+  while (lo<hi){
+    size_t mid=(lo+hi)>>1;
+    uint16_t u=pgm_read_word(&${baseName}_map[mid].uni);
+    if (u==uni){ codeOut=pgm_read_byte(&${baseName}_map[mid].code); return true; }
+    if (u<uni) lo=mid+1; else hi=mid;
+  }
+  return false;
+}
+
+// In UTF-8 qua mapping 8-bit code của font .h
+// Bật debug: #define VN_DEBUG 1 trước khi include file này
+static void tft_printVN(TFT_eSPI &tft, const String &s){
+  const uint8_t *p=(const uint8_t*)s.c_str();
+  while (*p){
+    uint8_t b=*p;
+    if (b<0x80){
+      uint8_t code;
+      if (mapUnicodeToCode(b, code)) { 
+        #ifdef VN_DEBUG
+        Serial.printf("U+%04X -> 0x%02X [ASCII mapped]\\n", (unsigned)b, code);
+        #endif
+        tft.write(code); 
+      } else { 
+        #ifdef VN_DEBUG
+        Serial.printf("U+%04X passthru\\n", (unsigned)b);
+        #endif
+        tft.write(b); 
+      }
+      p++; continue;
+    }
+    uint32_t uni=0;
+    if ((b&0xE0)==0xC0 && p[1]){ uni=((p[0]&0x1F)<<6) | (p[1]&0x3F); p+=2; }
+    else if ((b&0xF0)==0xE0 && p[1] && p[2]){ uni=((p[0]&0x0F)<<12)|((p[1]&0x3F)<<6)|(p[2]&0x3F); p+=3; }
+    else if ((b&0xF8)==0xF0 && p[1] && p[2] && p[3]){ uni=((p[0]&0x07)<<18)|((p[1]&0x3F)<<12)|((p[2]&0x3F)<<6)|(p[3]&0x3F); p+=4; }
+    else { p++; continue; }
+    uint8_t code;
+    if (mapUnicodeToCode(uni, code)) { 
+      #ifdef VN_DEBUG
+      Serial.printf("U+%04X -> 0x%02X\\n", (unsigned)uni, code);
+      #endif
+      tft.write(code); 
+    }
+    else { 
+      #ifdef VN_DEBUG
+      Serial.printf("U+%04X missing -> '?'\\n", (unsigned)uni);
+      #endif
+      tft.write('?'); 
+    }
+  }
+}
+
+#endif // ${mapGuard}
+`;
+
+  return {
+    headerH, mapH,
+    glyphCount: mapping.length,
+    firstCode: firstCodeUsed,
+    lastCode:  lastCodeUsed,
+    yAdvance,
+    bitmapBytes: bitmapsBytesCount
+  };
+}
+
+// Action
+btnMake.addEventListener('click', ()=>{
+  if(!fontFile.files || fontFile.files.length===0){ alert('Vui lòng chọn TTF/OTF'); return; }
+  const px = parseInt(fontPx.value,10)||24;
+  const fc = parseInt(firstCode.value,10)||32;
+  const thr= parseInt(threshold.value,10); 
+  const wantAscii = addAscii.checked;
+  const outName = (fontName.value||'ArialVN_24').replace(/\W+/g,'_');
+
+  // Unique ký tự giữ thứ tự nhập
+  const seen = new Set(); let rawChars='';
+  for (const ch of (charBox.value||'')) {
+    if (ch==='\r'||ch==='\n'||ch==='\t') continue;
+    if (seen.has(ch)) continue; seen.add(ch); rawChars += ch;
+  }
+
+  btnMake.disabled = true; busy.classList.remove('hidden'); report.classList.add('hidden');
+
+  const reader = new FileReader();
+  reader.onload = (ev)=>{
+    try{
+      const font = opentype.parse(ev.target.result);
+      const res = buildGFX(font, px, fc, isNaN(thr)?128:thr, wantAscii, rawChars, outName);
+
+      // Download files
+      downloadText(`${outName}pt7b.h`, res.headerH);
+      downloadText(`${outName}_map.h`,  res.mapH);
+
+      repMsg.textContent    = "OK – Đã tạo 2 file .h";
+      repGlyphs.textContent = res.glyphCount;
+      repFL.textContent     = `${res.firstCode}..${res.lastCode}`;
+      repYA.textContent     = res.yAdvance;
+      repBB.textContent     = res.bitmapBytes.toLocaleString('vi-VN');
+      report.classList.remove('hidden');
+    }catch(e){
+      console.error(e);
+      alert('Lỗi: ' + (e.message || e));
+    }finally{
+      btnMake.disabled=false; busy.classList.add('hidden');
+    }
+  };
+  reader.onerror = ()=>{ alert('Không đọc được file font'); btnMake.disabled=false; busy.classList.add('hidden'); };
+  reader.readAsArrayBuffer(fontFile.files[0]);
+});
+</script>
+</body>
+</html>

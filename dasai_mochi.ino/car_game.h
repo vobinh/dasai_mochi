@@ -105,7 +105,7 @@ static void drawObs(const Obstacle& o){
 static void hud(){
   _sprite->setTextColor(COL_HUD, COL_ROAD);
   _sprite->setTextSize(2);
-  _sprite->setCursor(10, 10);
+  _sprite->setCursor(10, SCREEN_H / 2);
   _sprite->print(score);
   if(paused){ 
       _sprite->setTextDatum(MC_DATUM);

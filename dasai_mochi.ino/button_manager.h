@@ -5,7 +5,7 @@
 #include "globals.h"  // Để sử dụng enum ButtonAction
 
 // --- CẤU HÌNH ---
-#define BUTTON_PIN 0
+#define BUTTON_PIN 1
 
 // --- BIẾN TĨNH (CHỈ DÙNG TRONG MODULE NÀY) ---
 static int activeButtonState;

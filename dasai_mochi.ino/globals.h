@@ -25,7 +25,15 @@ enum Mode {
   ANALOG_WATCH_MODE,
   WEATHER_MODE,
   MUSIC_LIST_MODE,
-  MUSIC_PLAYER_MODE
+  MUSIC_PLAYER_MODE,
+  SCROLL_TEXT_SETTINGS_MODE,
+  SCROLL_TEXT_MODE
+};
+
+struct ScrollTextSettings {
+  String text;
+  int speed;
+  uint16_t textColor;
 };
 
 struct AppSettings {
@@ -38,7 +46,9 @@ struct AppSettings {
   bool soundEnabled; // *** BIẾN MỚI: Bật/tắt âm thanh ***
   int volume;        // *** BIẾN MỚI: Mức âm lượng (0-30) ***
   bool musicAutoPlayNext;
-  DisplayShape displayShape; 
+  DisplayShape displayShape;
+  ScrollTextSettings scrollText;
+  bool bluetoothEnabled;
 };
 
 #endif

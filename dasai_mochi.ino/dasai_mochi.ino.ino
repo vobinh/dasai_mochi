@@ -7,23 +7,25 @@
 #include <vector>
 #include <time.h>
 #include "FontMaker.h"
+#include "DigitaltsLime35pt7b.h"
 
 #include "globals.h"
 #include "ui_utils.h"
 #include "menu_manager.h"
 #include "button_manager.h"
+#include "audio_manager.h"
+#include "chronos_manager.h"
+#include "ui_effects.h"
+
 #include "flappy_game.h"
 #include "car_game.h"
 #include "hour_hand.h"
 #include "minute_hand.h"
 #include "second_hand.h"
-#include "chronos_manager.h"
-#include "ui_effects.h"
 #include "analog_face.h"
-#include "DigitaltsLime35pt7b.h"
 #include "weather_icons.h"
 #include "player_icons.h"
-#include "audio_manager.h"
+
 
 // --- CẤU HÌNH ---
 #define VIDEO_JUMP_TARGET 2
@@ -55,15 +57,35 @@ typedef struct _VideoInfo {
 #include "video02.h"
 #include "video03.h"
 #include "video04.h"
-VideoInfo *flashVideoList[] = { &video01, &video02, &video03, &video04 };
+#include "video05.h"
+#include "video06.h"
+#include "video07.h"
+VideoInfo *flashVideoList[] = { &video01, &video02, &video03, &video04, &video06, &video06, &video07 };
 const uint8_t NUM_FLASH_VIDEOS = sizeof(flashVideoList) / sizeof(flashVideoList[0]);
 uint8_t currentVideoIndex = 0;
 uint16_t currentFrame = 0;
 
+VideoInfo analogFaces = { analog_face_frames, analog_face_frames_size, analog_face_num_frames };
+
+// --- MUSIC VARS ---
 int musicListScrollOffset = 0;
 int selectedMusicItem = 0;
 
-VideoInfo analogFaces = { analog_face_frames, analog_face_frames_size, analog_face_num_frames };
+// --- SCROLL TEXT SETTINGS VARS ---
+static int scrollTextSettingsSelectedItem = 0;
+const int NUM_SCROLL_TEXT_SETTINGS_ITEMS = 4;
+static String scrollTextSettingsItems[NUM_SCROLL_TEXT_SETTINGS_ITEMS];
+static bool reset_scroll_text_position = false;
+// Options for color setting
+static const uint16_t colorOptions[] = { TFT_WHITE, TFT_RED, TFT_GREEN, TFT_BLUE, TFT_YELLOW, TFT_CYAN, TFT_MAGENTA };
+static const String colorNames[] = { "Trắng", "Đỏ", "Xanh L", "Xanh D", "Vàng", "Lơ", "Tím" };
+static const int numColorOptions = sizeof(colorOptions) / sizeof(colorOptions[0]);
+static int tempColorIndex = 0;
+// Options for speed setting
+static const int speedOptions[] = { 50, 35, 20 };  // Chậm, Vừa, Nhanh
+static const String speedLabels[] = { "Chậm", "Vừa", "Nhanh" };
+static const int numSpeedOptions = sizeof(speedOptions) / sizeof(speedOptions[0]);
+static int tempSpeedIndex = 0;
 
 // --- KHAI BÁO HÀM ---
 void saveSettings();
@@ -73,7 +95,9 @@ void drawAnalogWatchFace();
 void drawWeatherScreen();
 void drawMusicListScreen();
 void drawMusicPlayerScreen();
-
+void drawScrollTextMode(bool reset = false);
+void drawScrollTextSettingsScreen();
+void initScrollTextSettings();
 // =======================================================================================
 // --- CÁC HÀM TIỆN ÍCH VÀ CALLBACK CHO VIỆC VẼ ---
 // =======================================================================================
@@ -135,6 +159,12 @@ void handleSerialCommands() {
       Serial.println("Tracklist updated. Restarting...");
       delay(1000);
       ESP.restart();
+    } else if (command.startsWith("set_scroll_text:")) {
+      Serial.println("Received command: set_scroll_text");
+      String newText = command.substring(16);
+      settings.scrollText.text = newText;
+      saveSettings();
+      Serial.println("Scroll text updated.");
     }
   }
 }
@@ -199,7 +229,7 @@ void drawWeatherIcon(int iconIndex, int x, int y) {
   }
   // Đọc con trỏ từ PROGMEM, sau đó đọc dữ liệu ảnh từ con trỏ đó
   const uint16_t *icon_ptr = (const uint16_t *)pgm_read_ptr(&weather_icons[iconIndex]);
-  screenSprite.pushImage(x, y, WEATHER48_W, WEATHER48_H, icon_ptr);
+  screenSprite.pushImage(x, y, WEATHER_W, WEATHER_H, icon_ptr);
 }
 
 String getWeatherLabel(int iconIndex) {
@@ -295,6 +325,7 @@ void drawWeatherScreen() {
   WeatherData weather = chronos_get_weather();
   int iconIndex = weather.icon;
 
+
   // --- GIAI ĐOẠN 3: VẼ HIỆU ỨNG NỀN ĐỘNG ---
   if (iconIndex == 3 || iconIndex == 4) {  // Mưa hoặc Dông
     drawRainEffect(&tft, &screenSprite);
@@ -302,29 +333,170 @@ void drawWeatherScreen() {
     screenSprite.fillSprite(TFT_BLACK);
   }
 
+  int hWidth = tft.width() / 2;
+
   // --- GIAI ĐOẠN 2: VẼ GIAO DIỆN CHÍNH ---
   myfont.print((tft.width() - myfont.getLength(weather.city)) / 2, 20, weather.city, TFT_WHITE, TFT_BLACK);
 
   // Vẽ icon thời tiết
-  drawWeatherIcon(iconIndex, (tft.width() - WEATHER48_W) / 2, 50);
+  drawWeatherIcon(iconIndex, (tft.width() / 2 - WEATHER_W) / 2, tft.height() / 2 - WEATHER_H / 2 - 16);
 
   // Vẽ nhãn thời tiết
   String label = getWeatherLabel(iconIndex);
-  myfont.print((tft.width() - myfont.getLength(label)) / 2, 105, label, TFT_CYAN, TFT_BLACK);
+  myfont.print((tft.width() / 2 - myfont.getLength(label)) / 2, tft.height() / 2 + 20, label, TFT_CYAN, TFT_BLACK);
 
   // Nhiệt độ hiện tại
-  String tempStr = String(weather.currentTemp) + " C";
-  myfont.print((tft.width() - myfont.getLength(tempStr)) / 2, 140, tempStr, TFT_ORANGE, TFT_BLACK);
+  String tempStr = String(weather.currentTemp) + "°C";
+  // myfont.print((tft.width() + (tft.width() - myfont.getLength(tempStr))) / 2, tft.height() / 2, tempStr, TFT_ORANGE, TFT_BLACK);
+
+  screenSprite.setFreeFont(&DigitaltsLime35pt7b);
+  int textWidth = screenSprite.textWidth(tempStr);
+  int x_pos = hWidth + (hWidth - textWidth) / 2;
+  int y_pos = (tft.height() - 55) / 2;
+  screenSprite.setTextColor(TFT_ORANGE, TFT_BLACK);
+  screenSprite.drawString(tempStr, x_pos, y_pos);
+  screenSprite.setFreeFont(NULL);
+
+  // screenSprite->setTextColor(TFT_ORANGE, TFT_BLACK);
+  // screenSprite->setTextSize(2);
+  // screenSprite->setCursor(10, tft.height() / 2);
+  // screenSprite->print(score);
 
   // Nhiệt độ cao/thấp
-  String highLowStr = "H:" + String(weather.highTemp) + " L:" + String(weather.lowTemp);
+  String highLowStr = "H:" + String(weather.highTemp) + "°C L:" + String(weather.lowTemp) + "°C";
   myfont.print((tft.width() - myfont.getLength(highLowStr)) / 2, 170, highLowStr, TFT_WHITE, TFT_BLACK);
 
   // Thông tin khác
-  String infoStr = "UV: " + String(weather.uv) + " | Áp Suất: " + String(weather.pressure);
+  // String infoStr = "UV: " + String(weather.uv) + " | AS: " + String(weather.pressure);
+  String infoStr = "UV: " + String(weather.uv);
   myfont.print((tft.width() - myfont.getLength(infoStr)) / 2, 200, infoStr, TFT_WHITE, TFT_BLACK);
 
   screenSprite.pushSprite(0, 0);
+}
+
+
+void drawScrollTextMode(bool reset) {
+  screenSprite.fillSprite(TFT_BLACK);
+  static int32_t scroll_x = 0;
+  static uint32_t last_scroll_time = 0;
+  int screen_width = tft.width();
+
+  if (reset) {
+    scroll_x = screen_width;  // Bắt đầu chạy từ cạnh phải
+  }
+
+  String text = settings.scrollText.text;
+  uint16_t textColor = settings.scrollText.textColor;
+  int speed_delay = settings.scrollText.speed;
+
+  int text_width = myfont.getLength(text);
+  int y_pos = (tft.height() - 20) / 2;
+
+  // Nếu văn bản ngắn hơn màn hình, hiển thị tĩnh ở giữa
+  if (text_width <= screen_width) {
+    int x_pos = (screen_width - text_width) / 2;
+    myfont.print(x_pos, y_pos, text, textColor, TFT_BLACK);
+  }
+  // Nếu văn bản dài hơn, chạy chữ
+  else {
+    // Cập nhật vị trí cuộn dựa trên thời gian
+    if (millis() - last_scroll_time > speed_delay) {
+      last_scroll_time = millis();
+      scroll_x--;
+    }
+
+    // Khoảng cách giữa các lần lặp lại của văn bản
+    int gap = 100;
+    int cycle_length = text_width + gap;
+
+    // Vẽ bản chính
+    myfont.print(scroll_x, y_pos, text, textColor, TFT_BLACK);
+
+    // Vẽ bản sao ngay sau bản chính để tạo hiệu ứng nối liền
+    myfont.print(scroll_x + cycle_length, y_pos, text, textColor, TFT_BLACK);
+
+    // Khi bản chính đã chạy hoàn toàn ra khỏi màn hình,
+    // reset vị trí của nó về phía trước một chu kỳ để tạo vòng lặp.
+    if (scroll_x < -cycle_length) {
+      scroll_x += cycle_length;
+    }
+  }
+  screenSprite.pushSprite(0, 0);
+}
+
+void drawScrollTextSettingsScreen() {
+  screenSprite.fillSprite(TFT_BLACK);
+  const int startY = 30;
+  const int itemHeight = 35;
+  const int screen_center_x = tft.width() / 2;
+  const int screen_radius = tft.width() / 2;
+
+  String title = "Cài Đặt Chữ Chạy";
+  myfont.print((tft.width() - myfont.getLength(title)) / 2, 5, title, TFT_CYAN, TFT_BLACK);
+
+  for (int i = 0; i < NUM_SCROLL_TEXT_SETTINGS_ITEMS; i++) {
+    int yPos = startY + i * (itemHeight + 5);
+    bool isSelected = (i == scrollTextSettingsSelectedItem);
+    uint16_t bgColor = isSelected ? TFT_BLUE : TFT_DARKGREY;
+    uint16_t textColor = TFT_WHITE;
+
+    int itemX = 10;
+    int itemW = tft.width() - 20;
+
+    if (settings.displayShape == SHAPE_ROUND) {
+      int itemCenterY = yPos + (itemHeight / 2);
+      int d = abs(screen_radius - itemCenterY);
+      if (d < screen_radius) {
+        int w_half = sqrt(screen_radius * screen_radius - d * d) - 10;  // padding
+        if (w_half > 0) {
+          itemW = w_half * 2;
+          itemX = screen_center_x - w_half;
+        } else {
+          itemW = 0;
+        }
+      } else {
+        itemW = 0;
+      }
+    }
+
+    if (itemW > 0) {
+      screenSprite.fillRoundRect(itemX, yPos, itemW, itemHeight, 5, bgColor);
+      myfont.print(itemX + 10, yPos + 10, scrollTextSettingsItems[i], textColor, bgColor);
+
+      String valueStr = "";
+      if (i == 0) {  // Color
+        valueStr = colorNames[tempColorIndex];
+        screenSprite.fillRoundRect(itemX + itemW - 50, yPos + 5, 40, itemHeight - 10, 3, colorOptions[tempColorIndex]);
+      } else if (i == 1) {  // Speed
+        valueStr = speedLabels[tempSpeedIndex];
+      }
+
+      if (valueStr.length() > 0) {
+        int textW = myfont.getLength(valueStr);
+        myfont.print(itemX + itemW - textW - 60, yPos + 10, valueStr, textColor, bgColor);
+      }
+    }
+  }
+  screenSprite.pushSprite(0, 0);
+}
+
+void initScrollTextSettings() {
+  // Tìm chỉ số cho màu và tốc độ hiện tại để khởi tạo cài đặt tạm thời
+  tempColorIndex = 0;  // Mặc định là tùy chọn đầu tiên
+  for (int i = 0; i < numColorOptions; i++) {
+    if (settings.scrollText.textColor == colorOptions[i]) {
+      tempColorIndex = i;
+      break;
+    }
+  }
+  tempSpeedIndex = 0;  // Mặc định là tùy chọn đầu tiên
+  for (int i = 0; i < numSpeedOptions; i++) {
+    if (settings.scrollText.speed == speedOptions[i]) {
+      tempSpeedIndex = i;
+      break;
+    }
+  }
+  scrollTextSettingsSelectedItem = 0;
 }
 
 // =======================================================================================
@@ -333,6 +505,9 @@ void drawWeatherScreen() {
 void setup() {
   Serial.begin(115200);
   tft.begin();
+  tft.fillScreen(TFT_BLACK);
+  delay(100);
+
   screenSprite.createSprite(tft.width(), tft.height());
   myfont.set_font(Fira_Code_16);
 
@@ -348,10 +523,12 @@ void setup() {
   initMusicVisualizer(&tft);
   audio_init();
 
+  audio_set_volume(0);
+
   loadSettings();
 
   tft.setRotation(settings.currentRotation);
-  tft.fillScreen(TFT_BLACK);
+
   TJpgDec.setJpgScale(1);
   TJpgDec.setSwapBytes(true);
   TJpgDec.setCallback(tft_output);
@@ -369,16 +546,46 @@ void setup() {
   secondHandSprite.setPivot(SECOND_PIVOT_X, SECOND_PIVOT_Y);
   secondHandSprite.pushImage(0, 0, SECOND_HAND_WIDTH, SECOND_HAND_HEIGHT, secondHandImage);
 
+  String auth = "...VOBINH...";
+  tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+  tft.setTextSize(2);
+  tft.drawString(auth, (tft.width() - tft.textWidth(auth)) / 2, tft.height() / 2);
   Serial.println("Setup done!");
+  delay(1000);
 }
 
 void loop() {
   handleSerialCommands();
-  chronos_loop();
+
+  if (settings.bluetoothEnabled) {
+    chronos_loop();
+    switch (chronos_get_requested_action()) {
+      case CHRONOS_ACTION_SAVE_SETTINGS:
+        Serial.println("Settings changed via Chronos, saving...");
+        saveSettings();
+        // Thêm logic khởi động lại nếu cần, ví dụ sau khi đổi tracklist
+        // ESP.restart();
+        break;
+      case CHRONOS_ACTION_RESET_CONFIG:
+        Serial.println("Remote reset command received via Chronos.");
+        if (SPIFFS.exists(CONFIG_FILE)) {
+          SPIFFS.remove(CONFIG_FILE);
+        }
+        Serial.println("Restarting...");
+        delay(1000);
+        ESP.restart();
+        break;
+      case CHRONOS_ACTION_NONE:
+      default:
+        // Không làm gì cả
+        break;
+    }
+  }
+
   audio_loop();  // *** GỌI HÀM LOOP CỦA MODULE ÂM THANH ***
   ButtonAction action = getButtonAction();
 
-  bool isAlertEvent = chronos_is_ringing() || chronos_has_new_notification() || chronos_has_new_navigation();
+  bool isAlertEvent = settings.bluetoothEnabled && (chronos_is_ringing() || chronos_has_new_notification() || chronos_has_new_navigation());
 
   if (isAlertEvent && !isDisplayingAlert) {
     if (currentMode != MENU) {
@@ -394,9 +601,13 @@ void loop() {
     case PLAYING:
       {
         static int lastVideoIndex = -1;
-        if (action == ACTION_TRIPLE || action == ACTION_LONG) {
+        if (action == ACTION_LONG) {
+          currentMode = SCROLL_TEXT_MODE;
+          break;
+        }
+        if (action == ACTION_TRIPLE) {
           currentMode = MENU;
-          menu_enter();
+          menu_enter(true);
           break;
         }
         if (action == ACTION_SINGLE) {
@@ -439,16 +650,25 @@ void loop() {
 
     case MENU:
       {
+        bool oldBluetoothSetting = settings.bluetoothEnabled;
         Mode newMode = menu_handle_action(action);
         if (newMode != MENU) {
           if (menu_manager_save_triggered()) {
             saveSettings();
+            if (oldBluetoothSetting != settings.bluetoothEnabled) {
+                ESP.restart();
+            }
             loadSettings();
             tft.setRotation(settings.currentRotation);
             audio_set_volume(settings.volume);
             audio_set_autoplay(settings.musicAutoPlayNext);
           }
           currentMode = newMode;
+
+          if (currentMode == SCROLL_TEXT_SETTINGS_MODE) {
+            initScrollTextSettings();
+          }
+
           tft.fillScreen(TFT_BLACK);
           if (currentMode == GAME_FLAPPY)
             Flappy::start();
@@ -587,6 +807,55 @@ void loop() {
         drawMusicPlayerScreen();
         break;
       }
+    case SCROLL_TEXT_MODE:
+      {
+        if (action == ACTION_LONG) {
+          currentMode = PLAYING;
+          break;
+        }
+        if (action == ACTION_DOUBLE) {
+          currentMode = SCROLL_TEXT_SETTINGS_MODE;  // Quay lại màn hình cài đặt
+          initScrollTextSettings();
+        }
+        drawScrollTextMode(reset_scroll_text_position);
+        reset_scroll_text_position = false;
+        break;
+      }
+    case SCROLL_TEXT_SETTINGS_MODE:
+      {
+        if (action == ACTION_SINGLE) {
+          scrollTextSettingsSelectedItem = (scrollTextSettingsSelectedItem + 1) % NUM_SCROLL_TEXT_SETTINGS_ITEMS;
+        } else if (action == ACTION_DOUBLE) {  // Thay đổi giá trị
+          switch (scrollTextSettingsSelectedItem) {
+            case 0:  // Color
+              tempColorIndex = (tempColorIndex + 1) % numColorOptions;
+              break;
+            case 1:  // Speed
+              tempSpeedIndex = (tempSpeedIndex + 1) % numSpeedOptions;
+              break;
+          }
+        } else if (action == ACTION_LONG) {  // Chọn
+          switch (scrollTextSettingsSelectedItem) {
+            case 2:  // View
+              // Áp dụng cài đặt tạm thời để xem trước
+              settings.scrollText.textColor = colorOptions[tempColorIndex];
+              settings.scrollText.speed = speedOptions[tempSpeedIndex];
+              currentMode = SCROLL_TEXT_MODE;
+              reset_scroll_text_position = true;
+              break;
+            case 3:  // Save & Exit
+              // Lưu cài đặt và thoát về menu chính
+              settings.scrollText.textColor = colorOptions[tempColorIndex];
+              settings.scrollText.speed = speedOptions[tempSpeedIndex];
+              saveSettings();
+              currentMode = MENU;
+              menu_enter();
+              break;
+          }
+        }
+        drawScrollTextSettingsScreen();
+        break;
+      }
   }
 }
 
@@ -608,6 +877,12 @@ void saveSettings() {
   doc["volume"] = settings.volume;
   doc["musicAutoPlayNext"] = settings.musicAutoPlayNext;
   doc["displayShape"] = (settings.displayShape == SHAPE_SQUARE) ? "square" : "round";
+  doc["bluetoothEnabled"] = settings.bluetoothEnabled;
+
+  JsonObject scrollText = doc.createNestedObject("scrollText");
+  scrollText["text"] = settings.scrollText.text;
+  scrollText["speed"] = settings.scrollText.speed;
+  scrollText["textColor"] = settings.scrollText.textColor;
 
   // *** LƯU DANH SÁCH NHẠC VÀO JSON ***
   JsonArray tracks = doc.createNestedArray("trackList");
@@ -629,8 +904,9 @@ void saveSettings() {
   setting_vi["item6"] = "Âm lượng";
   setting_vi["item7"] = "Tự Động Chuyển Bài";
   setting_vi["item8"] = "Hình Dạng";
-  setting_vi["item9"] = "Lưu";
-  setting_vi["item10"] = "Thoát";
+  setting_vi["item9"] = "Bluetooth";
+  setting_vi["item10"] = "Lưu";
+  setting_vi["item11"] = "Thoát";
   JsonObject mode_vi = menu_vi.createNestedObject("mode");
   mode_vi["item0"] = "Chơi Flappy";
   mode_vi["item1"] = "Chơi Đua Xe";
@@ -638,7 +914,14 @@ void saveSettings() {
   mode_vi["item3"] = "Đồng hồ kim";
   mode_vi["item4"] = "Thời Tiết";
   mode_vi["item5"] = "Nghe Nhạc";
-  mode_vi["item6"] = "Thoát";
+  mode_vi["item6"] = "Chữ chạy";
+  mode_vi["item7"] = "Thoát";
+
+  JsonObject scroll_text_settings_vi = menu_vi.createNestedObject("scroll_text_settings");
+  scroll_text_settings_vi["item0"] = "Màu Sắc";
+  scroll_text_settings_vi["item1"] = "Tốc Độ";
+  scroll_text_settings_vi["item2"] = "Xem";
+  scroll_text_settings_vi["item3"] = "Lưu & Thoát";
 
   JsonObject menu_en = doc.createNestedObject("menu_en");
   menu_en["tab_setting"] = "SETTING";
@@ -653,8 +936,9 @@ void saveSettings() {
   setting_en["item6"] = "Volume";
   setting_en["item7"] = "Auto Next";
   setting_en["item8"] = "Display Shape";
-  setting_en["item9"] = "Save";
-  setting_en["item10"] = "Exit";
+  setting_en["item9"] = "Bluetooth";
+  setting_en["item10"] = "Save";
+  setting_en["item11"] = "Exit";
   JsonObject mode_en = menu_en.createNestedObject("mode");
   mode_en["item0"] = "Play Flappy";
   mode_en["item1"] = "Play Car Game";
@@ -662,7 +946,14 @@ void saveSettings() {
   mode_en["item3"] = "Watch (Analog)";
   mode_en["item4"] = "Weather";
   mode_en["item5"] = "Play Music";
-  mode_en["item6"] = "Exit";
+  mode_en["item6"] = "Marquee";
+  mode_en["item7"] = "Exit";
+
+  JsonObject scroll_text_settings_en = menu_en.createNestedObject("scroll_text_settings");
+  scroll_text_settings_en["item0"] = "Color";
+  scroll_text_settings_en["item1"] = "Speed";
+  scroll_text_settings_en["item2"] = "View";
+  scroll_text_settings_en["item3"] = "Save & Exit";
 
   serializeJson(doc, configFile);
   configFile.close();
@@ -691,6 +982,12 @@ void loadSettings() {
       settings.musicAutoPlayNext = doc["musicAutoPlayNext"] | true;
       String shapeStr = doc["displayShape"] | "square";
       settings.displayShape = (shapeStr == "round") ? SHAPE_ROUND : SHAPE_SQUARE;
+      settings.bluetoothEnabled = doc["bluetoothEnabled"] | true;
+
+      JsonObject scrollText = doc["scrollText"];
+      settings.scrollText.text = scrollText["text"] | "Hello! Dasai Mochi.";
+      settings.scrollText.speed = scrollText["speed"] | 35;  // Tốc độ vừa
+      settings.scrollText.textColor = scrollText["textColor"] | TFT_WHITE;
 
       // *** TẢI DANH SÁCH NHẠC TỪ JSON ***
       JsonArray tracks = doc["trackList"];
@@ -701,6 +998,34 @@ void loadSettings() {
       audio_update_tracklist(loadedTracks);
 
       menu_load_strings(doc.as<JsonObject>());
+      JsonObject menu_text = (settings.currentLang == "vi") ? doc["menu_vi"] : doc["menu_en"];
+      bool scroll_settings_loaded = false;
+      if (menu_text) {
+        JsonObject scroll_settings_text = menu_text["scroll_text_settings"];
+        if (scroll_settings_text && !scroll_settings_text.isNull()) {
+          for (int i = 0; i < NUM_SCROLL_TEXT_SETTINGS_ITEMS; i++) {
+            scrollTextSettingsItems[i] = scroll_settings_text["item" + String(i)].as<String>();
+          }
+          if (scrollTextSettingsItems[0].length() > 0) {
+            scroll_settings_loaded = true;
+          }
+        }
+      }
+      // Nếu không tải được (do file config cũ), sử dụng giá trị mặc định
+      if (!scroll_settings_loaded) {
+        Serial.println("Scroll text settings strings not found, loading defaults.");
+        if (settings.currentLang == "vi") {
+          scrollTextSettingsItems[0] = "Màu Sắc";
+          scrollTextSettingsItems[1] = "Tốc Độ";
+          scrollTextSettingsItems[2] = "Xem";
+          scrollTextSettingsItems[3] = "Lưu & Thoát";
+        } else {
+          scrollTextSettingsItems[0] = "Color";
+          scrollTextSettingsItems[1] = "Speed";
+          scrollTextSettingsItems[2] = "View";
+          scrollTextSettingsItems[3] = "Save & Exit";
+        }
+      }
       success = true;
     }
     configFile.close();
@@ -718,6 +1043,11 @@ void loadSettings() {
     settings.volume = 15;
     settings.musicAutoPlayNext = true;
     settings.displayShape = SHAPE_SQUARE;
+    settings.bluetoothEnabled = true;
+
+    settings.scrollText.text = "Hello! Dasai Mochi.";
+    settings.scrollText.speed = 35;
+    settings.scrollText.textColor = TFT_YELLOW;
 
     audio_update_tracklist({});  // Tạo danh sách trống
 
@@ -735,8 +1065,9 @@ void loadSettings() {
     setting_vi["item6"] = "Âm lượng";
     setting_vi["item7"] = "Tự Động Chuyển Bài";
     setting_vi["item8"] = "Hình Dạng";
-    setting_vi["item9"] = "Lưu";
-    setting_vi["item10"] = "Thoát";
+    setting_vi["item9"] = "Bluetooth";
+    setting_vi["item10"] = "Lưu";
+    setting_vi["item11"] = "Thoát";
     JsonObject mode_vi = default_doc.createNestedObject("mode");
     mode_vi["item0"] = "Chơi Flappy";
     mode_vi["item1"] = "Chơi Đua Xe";
@@ -744,7 +1075,8 @@ void loadSettings() {
     mode_vi["item3"] = "Đồng hồ kim";
     mode_vi["item4"] = "Thời tiết";
     mode_vi["item5"] = "Nghe nhạc";
-    mode_vi["item6"] = "Thoát";
+    mode_vi["item6"] = "Chữ chạy";
+    mode_vi["item7"] = "Thoát";
 
     JsonObject menu_en = default_doc.createNestedObject("menu_en");
     menu_en["tab_setting"] = "SETTING";
@@ -759,8 +1091,9 @@ void loadSettings() {
     setting_en["item6"] = "Volume";
     setting_en["item7"] = "Auto Next";
     setting_en["item8"] = "Display Shape";
-    setting_en["item9"] = "Save";
-    setting_en["item10"] = "Exit";
+    setting_en["item9"] = "Bluetooth";
+    setting_en["item10"] = "Save";
+    setting_en["item11"] = "Exit";
     JsonObject mode_en = default_doc.createNestedObject("mode");
     mode_en["item0"] = "Play Flappy";
     mode_en["item1"] = "Play Car Game";
@@ -768,10 +1101,12 @@ void loadSettings() {
     mode_en["item3"] = "Watch (Analog)";
     mode_en["item4"] = "Weather";
     mode_en["item5"] = "Play Music";
-    mode_en["item6"] = "Exit";
+    mode_en["item6"] = "Marquee";
+    mode_en["item7"] = "Exit";
 
     menu_load_strings(default_doc.as<JsonObject>());
 
     saveSettings();
+    loadSettings();
   }
 }

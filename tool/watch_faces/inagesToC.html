@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<title>Image → C (RGB565) với khuôn mẫu header</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{--gap:14px}
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:20px;color:#111}
+  .row{display:flex;gap:var(--gap);flex-wrap:wrap;margin-bottom:var(--gap)}
+  .card{border:1px solid #e5e5e5;border-radius:12px;padding:14px;box-shadow:0 1px 4px rgba(0,0,0,.05);flex:1;min-width:280px}
+  label{display:block;font-size:13px;color:#333;margin-top:8px}
+  input[type="text"], input[type="number"], select, button{padding:8px 10px;border:1px solid #cfcfcf;border-radius:10px}
+  input[type="number"]{width:110px}
+  canvas{image-rendering:pixelated;border:1px dashed #ccc;border-radius:8px;background:#fafafa}
+  textarea{width:100%;min-height:220px;border-radius:12px;padding:12px;border:1px solid #ddd}
+  .muted{color:#666;font-size:12px}
+  .hstack{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .btn{background:#111;color:#fff;border-color:#111;cursor:pointer}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .hint{font-size:12px;color:#4b5563}
+</style>
+</head>
+<body>
+  <h2>Image → C Array (RGB565) — Xuất theo khuôn mẫu header</h2>
+
+  <div class="row">
+    <div class="card" style="max-width:460px">
+      <label>Chọn ảnh PNG</label>
+      <input id="file" type="file" accept="image/*">
+
+      <div class="row">
+        <div>
+          <label>Target Width</label>
+          <input id="w" type="number" min="1" value="60">
+        </div>
+        <div>
+          <label>Target Height</label>
+          <input id="h" type="number" min="1" value="60">
+        </div>
+        <div class="hstack" style="margin-top:28px">
+          <input id="keep" type="checkbox" checked>
+          <label for="keep" style="margin:0">Giữ tỉ lệ</label>
+        </div>
+      </div>
+
+      <!-- Pivot controls -->
+      <div class="row">
+        <div>
+          <label>Pivot X</label>
+          <input id="px" type="number" min="0" value="0">
+        </div>
+        <div>
+          <label>Pivot Y</label>
+          <input id="py" type="number" min="0" value="0">
+        </div>
+        <div class="hstack" style="margin-top:28px">
+          <input id="autoPivot" type="checkbox" checked>
+          <label for="autoPivot" style="margin:0">Pivot = center</label>
+        </div>
+      </div>
+
+      <label>Loại kim (tự sinh macro & tên biến)</label>
+      <select id="handType">
+        <option value="SECOND">Second (kim giây)</option>
+        <option value="MINUTE">Minute (kim phút)</option>
+        <option value="HOUR">Hour (kim giờ)</option>
+        <option value="CUSTOM">Custom...</option>
+      </select>
+
+      <div class="row" id="customFields" style="display:none">
+        <div>
+          <label>Tên macro prefix (VD: STATUS_ICON)</label>
+          <input id="macroPrefix" type="text" placeholder="TÊN_ẢNH">
+        </div>
+        <div>
+          <label>Tên biến mảng (VD: statusIconImage)</label>
+          <input id="varName" type="text" placeholder="imageData">
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Tên hiển thị trong comment</label>
+          <input id="displayName" type="text" value="Kim giây">
+          <div class="hint">Dùng cho phần mô tả “Kim ... (từ ảnh bạn cung cấp)”</div>
+        </div>
+        <div>
+          <label>Tên file xuất (.h)</label>
+          <input id="fileOut" type="text" value="second_hand.h">
+        </div>
+      </div>
+
+      <label>Endianness</label>
+      <select id="endian">
+        <option value="le" selected>Little endian (đảo byte 16-bit)</option>
+        <option value="be">Big endian</option>
+      </select>
+
+      <label>Alpha threshold (0..255): <span id="athVal">16</span></label>
+      <input id="ath" type="range" min="0" max="255" value="16">
+
+      <div class="hstack" style="margin-top:10px">
+        <input id="useProgmem" type="checkbox" checked>
+        <label for="useProgmem" style="margin:0">Dùng PROGMEM</label>
+      </div>
+
+      <div style="margin-top:12px" class="hstack">
+        <button id="convert" class="btn">Convert</button>
+        <button id="download" class="btn" disabled>Tải file .h</button>
+      </div>
+      <div class="muted" style="margin-top:6px">Gợi ý: ảnh nên là nền trong suốt PNG, canvas xem trước sẽ vẽ theo kích thước mục tiêu.</div>
+    </div>
+
+    <div class="card" style="flex:1">
+      <div class="muted">Preview</div>
+      <canvas id="canvas" width="60" height="60"></canvas>
+    </div>
+  </div>
+
+  <h3>Kết quả (xem trước nội dung file .h)</h3>
+  <textarea id="out" readonly></textarea>
+
+<script>
+// === Elements ===
+const file = document.getElementById('file');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const wInp = document.getElementById('w');
+const hInp = document.getElementById('h');
+const keep = document.getElementById('keep');
+const endianSel = document.getElementById('endian');
+const out = document.getElementById('out');
+const convertBtn = document.getElementById('convert');
+const downloadBtn = document.getElementById('download');
+const ath = document.getElementById('ath');
+const athVal = document.getElementById('athVal');
+const handType = document.getElementById('handType');
+const customFields = document.getElementById('customFields');
+const macroPrefix = document.getElementById('macroPrefix'); // kept for UI compatibility (not used in defines)
+const varName = document.getElementById('varName');
+const displayName = document.getElementById('displayName');
+const fileOut = document.getElementById('fileOut');
+const useProgmem = document.getElementById('useProgmem');
+// Pivot controls
+const pxInp = document.getElementById('px');
+const pyInp = document.getElementById('py');
+const autoPivot = document.getElementById('autoPivot');
+
+let img = new Image();
+let fileNameBase = 'image';
+
+// === UI helpers ===
+handType.addEventListener('change', syncNames);
+function syncNames(){
+  const preset = {
+    'SECOND': {varName: 'secondHandImage', comment: 'Kim giây',  file: 'second_hand.h'},
+    'MINUTE': {varName: 'minuteHandImage', comment: 'Kim phút',  file: 'minute_hand.h'},
+    'HOUR':   {varName: 'hourHandImage',   comment: 'Kim giờ',   file: 'hour_hand.h'},
+    'CUSTOM': {varName: (varName.value || 'imageData'), comment: (displayName.value || 'Ảnh'), file: (fileOut.value || 'image.h')}
+  };
+  const v = handType.value;
+  customFields.style.display = (v === 'CUSTOM') ? '' : 'none';
+  const o = preset[v];
+  varName.value = o.varName;
+  displayName.value = o.comment;
+  fileOut.value = o.file;
+}
+syncNames();
+
+macroPrefix.addEventListener('input', ()=>{});
+varName.addEventListener('input', ()=>{});
+displayName.addEventListener('input', ()=>{});
+fileOut.addEventListener('input', ()=>{});
+
+ath.addEventListener('input', () => athVal.textContent = ath.value);
+
+file.addEventListener('change', (e) => {
+  const f = e.target.files[0];
+  if(!f) return;
+  fileNameBase = (f.name || 'image').replace(/\.[^.]+$/, '');
+  const url = URL.createObjectURL(f);
+  img.onload = () => {
+    // autofill size and pivot
+    wInp.value = img.width;
+    hInp.value = img.height;
+    if (autoPivot.checked) {
+      pxInp.value = Math.floor(img.width/2);
+      pyInp.value = Math.floor(img.height/2);
+    }
+    draw();
+  };
+  img.src = url;
+});
+
+wInp.addEventListener('input', () => {
+  const w = Math.max(1, parseInt(wInp.value||1,10));
+  if (keep.checked && img.width) {
+    const ratio = img.height / img.width;
+    hInp.value = Math.max(1, Math.round(w * ratio));
+  }
+  if (autoPivot.checked) { pxInp.value = Math.floor(w/2); }
+  draw();
+});
+
+hInp.addEventListener('input', () => {
+  const h = Math.max(1, parseInt(hInp.value||1,10));
+  if (autoPivot.checked) { pyInp.value = Math.floor(h/2); }
+  draw();
+});
+
+keep.addEventListener('change', () => {
+  const w = Math.max(1, parseInt(wInp.value||1,10));
+  if (keep.checked && img.width) {
+    const ratio = img.height / img.width;
+    hInp.value = Math.max(1, Math.round(w * ratio));
+  }
+  if (autoPivot.checked) {
+    const h = Math.max(1, parseInt(hInp.value||1,10));
+    pxInp.value = Math.floor(w/2);
+    pyInp.value = Math.floor(h/2);
+  }
+  draw();
+});
+
+// Update pivot marker immediately when user edits Pivot X/Y
+pxInp.addEventListener('input', () => { autoPivot.checked = false; draw(); });
+pyInp.addEventListener('input', () => { autoPivot.checked = false; draw(); });
+pxInp.addEventListener('change', () => { autoPivot.checked = false; draw(); });
+pyInp.addEventListener('change', () => { autoPivot.checked = false; draw(); });
+
+// When re-enabling auto center, snap pivot to image center
+autoPivot.addEventListener('change', () => {
+  if (autoPivot.checked) {
+    const w = Math.max(1, parseInt(wInp.value||1,10));
+    const h = Math.max(1, parseInt(hInp.value||1,10));
+    pxInp.value = Math.floor(w/2);
+    pyInp.value = Math.floor(h/2);
+    draw();
+  }
+});
+
+function draw(){
+  const w = Math.max(1, parseInt(wInp.value||1,10));
+  const h = Math.max(1, parseInt(hInp.value||1,10));
+  canvas.width = w; canvas.height = h;
+  ctx.clearRect(0,0,w,h);
+  if (img && img.complete) {
+    ctx.drawImage(img, 0, 0, w, h);
+  }
+  // Draw pivot marker
+  const px = Math.max(0, Math.min(w-1, parseInt(pxInp.value||0,10)));
+  const py = Math.max(0, Math.min(h-1, parseInt(pyInp.value||0,10)));
+  const r = Math.max(2, Math.floor(Math.min(w,h)*0.03));
+  ctx.beginPath();
+  ctx.arc(px+0.5, py+0.5, r, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(255,50,50,0.95)';
+  ctx.strokeStyle = 'rgba(0,0,0,0.9)';
+  ctx.lineWidth = 1.5;
+  ctx.fill();
+  ctx.stroke();
+}
+
+// === Utils ===
+function wrapArray(arr, perLine = 12) {
+  const lines = [];
+  for (let i = 0; i < arr.length; i += perLine) {
+    lines.push('  ' + arr.slice(i, i + perLine).join(', '));
+  }
+  // LF trong bộ đệm; khi xuất sẽ đổi sang CRLF
+  return lines.join(',\n');
+}
+function rgb888to565(r,g,b){
+  return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+}
+function swap16(v){ return ((v & 0xFF) << 8) | ((v >> 8) & 0xFF); }
+function hex16(v){
+  let s = v.toString(16).toUpperCase();
+  while(s.length<4) s = '0'+s;
+  return '0x'+s;
+}
+
+// === Convert ===
+convertBtn.addEventListener('click', () => {
+  const w = Math.max(1, parseInt(wInp.value||1,10));
+  const h = Math.max(1, parseInt(hInp.value||1,10));
+  const endian = endianSel.value;
+  const aTh = parseInt(ath.value, 10);
+
+  // Pivot (clamped)
+  const px = Math.max(0, Math.min(w-1, parseInt(pxInp.value||0,10)));
+  const py = Math.max(0, Math.min(h-1, parseInt(pyInp.value||0,10)));
+
+  // Đọc pixel từ canvas offscreen (CHỈ ảnh, KHÔNG pivot)
+  const work = document.createElement('canvas');
+  work.width = w; work.height = h;
+  const wctx = work.getContext('2d');
+  if (img && img.complete) { wctx.drawImage(img, 0, 0, w, h); }
+  const data = wctx.getImageData(0,0,w,h).data;
+  const arr = new Array(w*h);
+  for(let i=0, j=0; i<data.length; i+=4, j++){
+    const r=data[i], g=data[i+1], b=data[i+2], a=data[i+3];
+    let v = rgb888to565(r,g,b);
+    if(a < aTh){ v = 0; }
+    if(endian==='le'){ v = swap16(v); }
+    arr[j] = hex16(v);
+  }
+
+  // ---- Macro base theo loại kim ----
+  const macroBase = (handType.value==='HOUR') ? 'HOUR_HAND'
+                    : (handType.value==='MINUTE') ? 'MINUTE_HAND'
+                    : (handType.value==='SECOND') ? 'SECOND_HAND'
+                    : (macroPrefix.value || 'IMAGE').toUpperCase().replace(/[^A-Z0-9_]/g,'_');
+
+  // Tên biến / comment / file
+  const varN  = (varName.value || 'imageData').replace(/[^A-Za-z0-9_]/g,'_');
+  const title = displayName.value || 'Ảnh';
+  const sizeText = w+'x'+h+' pixels';
+
+  // ---- Header ----
+  const header = `#pragma once
+
+/* =======================================================================================
+ * ${title} (từ ảnh bạn cung cấp)
+ * Kích thước: ${sizeText}
+ * =======================================================================================
+ */
+
+#define ${macroBase}_WIDTH   ${w}
+#define ${macroBase}_HEIGHT  ${h}
+#define ${macroBase}_PIVOT_X ${px}
+#define ${macroBase}_PIVOT_Y ${py}
+
+`;
+
+  // ---- Body ----
+  const prog = useProgmem.checked ? ' PROGMEM' : '';
+  const body = `// Mảng byte cho ảnh ${title.toLowerCase()} (RGB565)
+const uint16_t ${varN}[${macroBase}_WIDTH * ${macroBase}_HEIGHT]${prog} = {
+${wrapArray(arr, 12)}
+};`;
+
+  // CRLF để hiển thị đẹp trên Windows
+// Chuẩn hoá xuống dòng sang CRLF để thân thiện Notepad trên Windows
+const textCRLF = (header + body).replace(/\n/g, '\r\n');
+out.value = textCRLF;
+  downloadBtn.disabled = false;
+});
+
+// === Download ===
+downloadBtn.addEventListener('click', () => {
+  const name = (fileOut.value || 'image.h').replace(/[^A-Za-z0-9_\.\-]/g,'_');
+  const blob = new Blob([out.value], {type:'text/plain;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+});
+</script>
+</body>
+</html>

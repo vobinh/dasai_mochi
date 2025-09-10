@@ -47,9 +47,9 @@ namespace Flappy {
     _tft->fillCircle(s.birdX, s.birdY, s.birdR, TFT_YELLOW);
     _tft->drawCircle(s.birdX, s.birdY, s.birdR, TFT_ORANGE);
     _tft->setTextColor(TFT_WHITE, TFT_BLACK);
-    _tft->setCursor(4,4);
-    _tft->setTextSize(1);
-    _tft->printf("Score: %u", s.score);
+    _tft->setCursor(_tft->width()/2, 4);
+    _tft->setTextSize(2);
+    _tft->printf("%u", s.score);
     if (s.paused){
       _tft->setTextDatum(MC_DATUM);
       _tft->setTextColor(TFT_CYAN, TFT_BLACK);
