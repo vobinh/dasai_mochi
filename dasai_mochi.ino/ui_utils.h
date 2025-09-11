@@ -4,56 +4,28 @@
 #include <TFT_eSPI.h>
 #include "FontMaker.h"
 
+// Khai báo các biến toàn cục sẽ được sử dụng bởi các hàm tiện ích
+// Các biến này được định nghĩa trong tệp .ino chính
+extern TFT_eSPI tft;
+extern TFT_eSprite* fontTargetSprite;
+
 /**
- * @brief Vẽ văn bản với hiệu ứng chạy chữ nếu nó quá dài và đang được chọn.
- * @param speed_ms Thời gian (mili giây) giữa mỗi lần cập nhật vị trí, số nhỏ hơn = nhanh hơn.
+ * @brief Vẽ văn bản với hiệu ứng chạy chữ (nếu cần) và nền trong suốt.
+ * Đây là phiên bản đã được tối ưu hóa để sử dụng kỹ thuật "đóng dấu" sprite.
+ * @param sprite Sprite đích để vẽ lên.
+ * @param font Con trỏ tới đối tượng MakeFont.
+ * @param text Chuỗi văn bản để hiển thị.
+ * @param x Tọa độ X.
+ * @param y Tọa độ Y.
+ * @param width Chiều rộng tối đa của khu vực văn bản.
+ * @param textColor Màu của văn bản.
+ * @param bgColor Tham số này được giữ lại để tương thích, nhưng sẽ bị bỏ qua. Nền luôn trong suốt.
+ * @param isSelected Nếu là true và văn bản dài hơn width, hiệu ứng chạy chữ sẽ được kích hoạt.
+ * @param speed_ms Tốc độ chạy chữ (ms).
  */
-// *** ĐÃ SỬA LỖI: Thêm từ khóa "inline" để tránh lỗi "multiple definition" ***
-inline void drawMarqueeText(TFT_eSprite* sprite, MakeFont* font, String text, int16_t x, int16_t y, int16_t width, uint16_t textColor, uint16_t bgColor, bool isSelected, uint32_t speed_ms) {
-    static int16_t scroll_x = 0;
-    static uint32_t last_scroll_time = 0;
-    static String currently_selected_text = "";
+void drawMarqueeText(TFT_eSprite* sprite, MakeFont* font, String text, int16_t x, int16_t y, int16_t width, uint16_t textColor, uint16_t bgColor, bool isSelected, uint32_t speed_ms);
 
-    int16_t text_width = font->getLength(text);
 
-    if (text_width <= width) {
-        if (currently_selected_text == text) {
-            currently_selected_text = "";
-        }
-        font->print(x, y, text, textColor, bgColor);
-        return;
-    }
-
-    if (!isSelected) {
-        if (currently_selected_text == text) {
-            currently_selected_text = "";
-        }
-        sprite->setViewport(x, y, width, 20);
-        sprite->fillRect(0, 0, width, 20, bgColor);
-        font->print(0, 0, text, textColor, bgColor);
-        sprite->resetViewport();
-        return;
-    }
-
-    if (currently_selected_text != text) {
-        currently_selected_text = text;
-        scroll_x = 0;
-        last_scroll_time = millis();
-    }
-
-    if (millis() - last_scroll_time > speed_ms) {
-        last_scroll_time = millis();
-        scroll_x++;
-        if (scroll_x > text_width + 15) {
-            scroll_x = 0;
-        }
-    }
-
-    sprite->setViewport(x, y, width, 20);
-    sprite->fillRect(0, 0, width, 20, bgColor);
-    font->print(-scroll_x, 0, text, textColor, bgColor);
-    font->print(-scroll_x + text_width + 15, 0, text, textColor, bgColor);
-    sprite->resetViewport();
-}
+String extractTimeSafe(const String& text);
 
 #endif // UI_UTILS_H

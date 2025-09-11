@@ -25,6 +25,7 @@
 #include "analog_face.h"
 #include "weather_icons.h"
 #include "player_icons.h"
+#include "navigation_background.h"
 
 
 // --- CẤU HÌNH ---
@@ -38,9 +39,17 @@ TFT_eSprite screenSprite = TFT_eSprite(&tft);
 TFT_eSprite hourHandSprite = TFT_eSprite(&tft);
 TFT_eSprite minuteHandSprite = TFT_eSprite(&tft);
 TFT_eSprite secondHandSprite = TFT_eSprite(&tft);
+TFT_eSprite* fontTargetSprite = nullptr; // Con trỏ để chỉ định sprite nào sẽ nhận chữ vẽ
+
+void setSpritePixel_dynamic(int16_t x, int16_t y, uint16_t color) {
+  if (fontTargetSprite) {
+    fontTargetSprite->drawPixel(x, y, color);
+  }
+}
+// *** KẾT THÚC SỬA LỖI ***
 
 void setSpritePixel(int16_t x, int16_t y, uint16_t color);
-MakeFont myfont(&setSpritePixel);
+MakeFont myfont(&setSpritePixel_dynamic);
 
 Mode currentMode = PLAYING;
 AppSettings settings;
@@ -506,16 +515,23 @@ void setup() {
   Serial.begin(115200);
   tft.begin();
   tft.fillScreen(TFT_BLACK);
-  delay(100);
+  delay(50);
 
   screenSprite.createSprite(tft.width(), tft.height());
+  
+  // Mặc định, font sẽ vẽ lên sprite chính
+  fontTargetSprite = &screenSprite;
+
   myfont.set_font(Fira_Code_16);
 
   button_init();
 
-  menu_init(&tft, &screenSprite, &myfont, &settings);
+  menu_init(&screenSprite, &myfont, &settings);
 
   chronos_init(&tft, &screenSprite, &myfont, &settings);
+
+  NavigationBackground::begin(&screenSprite);
+
   Flappy::begin(&screenSprite);
   CarGame::begin(&screenSprite);
   initMatrixRain(&tft);
@@ -559,6 +575,7 @@ void loop() {
 
   if (settings.bluetoothEnabled) {
     chronos_loop();
+    NavigationBackground::tick();
     switch (chronos_get_requested_action()) {
       case CHRONOS_ACTION_SAVE_SETTINGS:
         Serial.println("Settings changed via Chronos, saving...");
@@ -903,8 +920,8 @@ void saveSettings() {
   setting_vi["item5"] = "Âm thanh";
   setting_vi["item6"] = "Âm lượng";
   setting_vi["item7"] = "Tự Động Chuyển Bài";
-  setting_vi["item8"] = "Hình Dạng";
-  setting_vi["item9"] = "Bluetooth";
+  setting_vi["item8"] = "Bluetooth";
+  setting_vi["item9"] = "Hình Dạng";
   setting_vi["item10"] = "Lưu";
   setting_vi["item11"] = "Thoát";
   JsonObject mode_vi = menu_vi.createNestedObject("mode");
@@ -935,8 +952,8 @@ void saveSettings() {
   setting_en["item5"] = "Sound Enabled";
   setting_en["item6"] = "Volume";
   setting_en["item7"] = "Auto Next";
-  setting_en["item8"] = "Display Shape";
-  setting_en["item9"] = "Bluetooth";
+  setting_en["item8"] = "Bluetooth";
+  setting_en["item9"] = "Display Shape";
   setting_en["item10"] = "Save";
   setting_en["item11"] = "Exit";
   JsonObject mode_en = menu_en.createNestedObject("mode");
@@ -972,7 +989,7 @@ void loadSettings() {
     DeserializationError error = deserializeJson(doc, configFile);
     if (!error) {
       settings.frameDelay = doc["frameDelay"] | 20;
-      settings.currentRotation = doc["currentRotation"] | 3;
+      settings.currentRotation = doc["currentRotation"] | 0;
       settings.currentLang = doc["language"] | "vi";
       settings.notificationTimeout = doc["notificationTimeout"] | 5;
       settings.marqueeSpeed = doc["marqueeSpeed"] | 35;
@@ -981,8 +998,8 @@ void loadSettings() {
       settings.volume = doc["volume"] | 10;
       settings.musicAutoPlayNext = doc["musicAutoPlayNext"] | true;
       String shapeStr = doc["displayShape"] | "square";
-      settings.displayShape = (shapeStr == "round") ? SHAPE_ROUND : SHAPE_SQUARE;
       settings.bluetoothEnabled = doc["bluetoothEnabled"] | true;
+      settings.displayShape = (shapeStr == "round") ? SHAPE_ROUND : SHAPE_SQUARE;
 
       JsonObject scrollText = doc["scrollText"];
       settings.scrollText.text = scrollText["text"] | "Hello! Dasai Mochi.";
@@ -1034,7 +1051,7 @@ void loadSettings() {
   if (!success) {
     Serial.println("Config not loaded or invalid. Creating default.");
     settings.frameDelay = 20;
-    settings.currentRotation = 3;
+    settings.currentRotation = 0;
     settings.currentLang = "vi";
     settings.notificationTimeout = 5;
     settings.marqueeSpeed = 35;
@@ -1042,8 +1059,8 @@ void loadSettings() {
     settings.soundEnabled = false;
     settings.volume = 15;
     settings.musicAutoPlayNext = true;
-    settings.displayShape = SHAPE_SQUARE;
     settings.bluetoothEnabled = true;
+    settings.displayShape = SHAPE_SQUARE;
 
     settings.scrollText.text = "Hello! Dasai Mochi.";
     settings.scrollText.speed = 35;
@@ -1064,8 +1081,8 @@ void loadSettings() {
     setting_vi["item5"] = "Âm thanh";
     setting_vi["item6"] = "Âm lượng";
     setting_vi["item7"] = "Tự Động Chuyển Bài";
-    setting_vi["item8"] = "Hình Dạng";
-    setting_vi["item9"] = "Bluetooth";
+    setting_vi["item8"] = "Bluetooth";
+    setting_vi["item9"] = "Hình Dạng";
     setting_vi["item10"] = "Lưu";
     setting_vi["item11"] = "Thoát";
     JsonObject mode_vi = default_doc.createNestedObject("mode");
@@ -1090,8 +1107,8 @@ void loadSettings() {
     setting_en["item5"] = "Sound Enabled";
     setting_en["item6"] = "Volume";
     setting_en["item7"] = "Auto Next";
-    setting_en["item8"] = "Display Shape";
-    setting_en["item9"] = "Bluetooth";
+    setting_en["item8"] = "Bluetooth";
+    setting_en["item9"] = "Display Shape";
     setting_en["item10"] = "Save";
     setting_en["item11"] = "Exit";
     JsonObject mode_en = default_doc.createNestedObject("mode");

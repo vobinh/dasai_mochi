@@ -6,7 +6,7 @@
 #include "FontMaker.h"
 #include "globals.h"
 
-void menu_init(TFT_eSPI* tft_ptr, TFT_eSprite* sprite_ptr, MakeFont* font_ptr, AppSettings* settings_ptr);
+void menu_init(TFT_eSprite* sprite_ptr, MakeFont* font_ptr, AppSettings* settings_ptr);
 void menu_load_strings(const JsonObject& doc);
 void menu_enter(bool resetSelection = false);
 Mode menu_handle_action(ButtonAction action);
