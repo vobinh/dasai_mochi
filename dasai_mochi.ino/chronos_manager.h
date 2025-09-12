@@ -25,7 +25,7 @@ enum ChronosAction {
 
 void chronos_init(TFT_eSPI* tft, TFT_eSprite* sprite, MakeFont* font, AppSettings* settings);
 void chronos_loop();
-bool chronos_draw_alerts();
+bool chronos_draw_alerts(ButtonAction action);
 
 // --- CÁC HÀM GETTER ---
 bool chronos_is_time_synced();

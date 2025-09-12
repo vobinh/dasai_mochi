@@ -41,6 +41,12 @@ static WeatherData latestWeather;
 static bool hasWeatherData = false;
 static ChronosAction requested_action = CHRONOS_ACTION_NONE;
 
+enum NavTimeOverride { TIME_AUTO, TIME_MANUAL_DAY, TIME_MANUAL_NIGHT };
+static NavTimeOverride navTimeOverride = TIME_AUTO;
+
+static bool is_arrived = false;
+static int current_nav_speed = 4;
+
 // *** BIẾN MỚI CHO HIỆU ỨNG CHỮ CHẠY DỌC ***
 struct RoadText {
   String text;  // Mỗi đối tượng chữ sẽ có nội dung riêng
@@ -208,11 +214,17 @@ static void configCallback(Config config, uint32_t a, uint32_t b) {
   switch (config) {
     case CF_NAV_DATA:
       if (a) {
+        if (!hasNewNavigation) {  // Bắt đầu một chuyến đi mới
+          NavigationBackground::reset();
+          is_arrived = false;
+          current_nav_speed = 4;
+        }
         latestNavigation = Chronos.getNavigation();
         hasNewNavigation = true;
         hasNewNotification = false;
       } else {
         hasNewNavigation = false;
+        navTimeOverride = TIME_AUTO;
       }
       break;
     case CF_NAV_ICON:
@@ -266,9 +278,22 @@ void chronos_loop() {
   Chronos.loop();
   getTimeFromRTC();
   chronos_tick_nav_animations();
+  // *** LOGIC GIẢM TỐC KHI ĐÃ ĐẾN NƠI ***
+  if (hasNewNavigation && is_arrived) {
+    if (current_nav_speed > 0) {
+      static unsigned long last_slowdown = 0;
+      if (millis() - last_slowdown > 200) {  // Giảm tốc từ từ
+        last_slowdown = millis();
+        current_nav_speed--;
+      }
+    }
+  } else {
+    current_nav_speed = 4;  // Tốc độ bình thường
+  }
+  NavigationBackground::setSpeed(current_nav_speed);
 }
 
-bool chronos_draw_alerts() {
+bool chronos_draw_alerts(ButtonAction action) {
   if (isRinging) {
     _sprite->fillSprite(TFT_BLACK);
     _font->print((_tft->width() - _font->getLength("CUỘC GỌI ĐẾN")) / 2, 30, "CUỘC GỌI ĐẾN", TFT_WHITE, TFT_BLACK);
@@ -281,7 +306,22 @@ bool chronos_draw_alerts() {
 
   if (hasNewNavigation) {
     // 1. Draw the dynamic driving background
-    NavigationBackground::draw(_sprite);
+    if (action == ACTION_LONG) {
+      navTimeOverride = (NavTimeOverride)((navTimeOverride + 1) % 3);  // Chuyển vòng qua 3 trạng thái
+    }
+
+    // Xác định giờ hiệu lực để vẽ
+    int effective_hour;
+    if (navTimeOverride == TIME_AUTO) {
+      effective_hour = chronos_get_hour();
+    } else if (navTimeOverride == TIME_MANUAL_NIGHT) {
+      effective_hour = 20;  // Giả lập ban đêm
+    } else {                // TIME_MANUAL_DAY
+      effective_hour = 12;  // Giả lập ban ngày
+    }
+
+    // 1. Vẽ nền động với giờ đã được xác định
+    NavigationBackground::draw(_sprite, effective_hour);
 
     // *** BẮT ĐẦU VẼ CHỮ XOAY DỌC (PHIÊN BẢN CẢI TIẾN) ***
     if (hasNewNavigation) {

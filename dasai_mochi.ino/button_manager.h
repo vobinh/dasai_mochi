@@ -62,7 +62,7 @@ ButtonAction getButtonAction() {
 
   static int clickCount = 0;
   static unsigned long lastClickTime = 0;
-  static unsigned long multiClickWindow = 350;
+  static unsigned long multiClickWindow = 500;
   static unsigned long longPressTime = 700;
   static unsigned long pressTime = 0;
 

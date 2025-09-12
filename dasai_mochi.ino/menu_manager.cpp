@@ -1,5 +1,5 @@
 #include "menu_manager.h"
-#include "ui_utils.h" // Sử dụng tệp .h đã được chuẩn hóa
+#include "ui_utils.h"  // Sử dụng tệp .h đã được chuẩn hóa
 #include <cmath>
 
 // =======================================================================================
@@ -31,11 +31,8 @@ static int selectedMenuItem = 0;
 static int menuScrollOffset = 0;
 static AppSettings temp_settings;
 
-// *** SỬA LỖI: Quay lại sử dụng số lượng mục menu cố định để đảm bảo ổn định ***
-static const int NUM_SETTING_ITEMS = 12;
-static const int NUM_MODE_ITEMS = 8;
-static String settingMenuItems[NUM_SETTING_ITEMS];
-static String modeMenuItems[NUM_MODE_ITEMS];
+static String settingMenuItems[NUM_SETTING_ITEMS_CONST];
+static String modeMenuItems[NUM_MODE_ITEMS_CONST];
 static String tabNames[2];
 
 static bool save_was_triggered = false;
@@ -51,45 +48,51 @@ void menu_init(TFT_eSprite* sprite_ptr, MakeFont* font_ptr, AppSettings* setting
   app_settings = settings_ptr;
 }
 
-// *** SỬA LỖI: Cập nhật logic tải chuỗi để xử lý các tệp config cũ một cách an toàn ***
 void menu_load_strings(const JsonObject& doc) {
   JsonObject menu_text = (app_settings->currentLang == "vi") ? doc["menu_vi"] : doc["menu_en"];
   
-  // Giá trị mặc định để phòng trường hợp tệp config cũ hoặc không hợp lệ
-  String default_settings_vi[] = {"Tốc độ video", "Xoay màn hình", "Ngôn ngữ", "TG Thông Báo", "Tốc độ chữ", "Âm thanh", "Âm lượng", "Tự Động Chuyển Bài", "Bluetooth", "Hình Dạng", "Lưu", "Thoát"};
-  String default_modes_vi[] = {"Chơi Flappy", "Chơi Đua Xe", "Đồng hồ số", "Đồng hồ kim", "Thời tiết", "Chữ chạy", "Nghe nhạc", "Thoát"};
-  String default_settings_en[] = {"Video Speed", "Screen Rotation", "Language", "Notif. Time", "Marquee Speed", "Sound Enabled", "Volume", "Auto Next", "Bluetooth", "Display Shape", "Save", "Exit"};
-  String default_modes_en[] = {"Play Flappy", "Play Car Game", "Watch (Digital)", "Watch (Analog)", "Weather", "Scroll Text", "Play Music", "Exit"};
+  const char* const* settings_pgm = (app_settings->currentLang == "vi") ? setting_items_vi : setting_items_en;
+  const char* const* modes_pgm = (app_settings->currentLang == "vi") ? mode_items_vi : mode_items_en;
 
   if (menu_text && !menu_text.isNull()) {
-    tabNames[0] = menu_text["tab_setting"] | ((app_settings->currentLang == "vi") ? "Cài đặt" : "Setting");
-    tabNames[1] = menu_text["tab_mode"] | ((app_settings->currentLang == "vi") ? "Chế độ" : "Mode");
+    JsonVariant tabSetting = menu_text["tab_setting"];
+    if (tabSetting.isNull()){
+        tabNames[0] = FPSTR((app_settings->currentLang == "vi") ? TAB_SETTING_VI : TAB_SETTING_EN);
+    } else {
+        tabNames[0] = tabSetting.as<String>();
+    }
+    
+    JsonVariant tabMode = menu_text["tab_mode"];
+    if (tabMode.isNull()) {
+        tabNames[1] = FPSTR((app_settings->currentLang == "vi") ? TAB_MODE_VI : TAB_MODE_EN);
+    } else {
+        tabNames[1] = tabMode.as<String>();
+    }
 
     JsonObject setting_text = menu_text["setting"];
     JsonObject mode_text = menu_text["mode"];
-    
-    String* default_settings = (app_settings->currentLang == "vi") ? default_settings_vi : default_settings_en;
-    String* default_modes = (app_settings->currentLang == "vi") ? default_modes_vi : default_modes_en;
 
-    for (int i = 0; i < NUM_SETTING_ITEMS; i++) {
-        String key = "item" + String(i);
-        settingMenuItems[i] = setting_text[key] | default_settings[i];
+    for (int i = 0; i < NUM_SETTING_ITEMS_CONST; i++) {
+        JsonVariant item = setting_text["item" + String(i)];
+        if(item.isNull()){
+            settingMenuItems[i] = FPSTR(pgm_read_ptr(&settings_pgm[i]));
+        } else {
+            settingMenuItems[i] = item.as<String>();
+        }
     }
-    for (int i = 0; i < NUM_MODE_ITEMS; i++) {
-        String key = "item" + String(i);
-        modeMenuItems[i] = mode_text[key] | default_modes[i];
+    for (int i = 0; i < NUM_MODE_ITEMS_CONST; i++) {
+        JsonVariant item = mode_text["item" + String(i)];
+        if(item.isNull()){
+            modeMenuItems[i] = FPSTR(pgm_read_ptr(&modes_pgm[i]));
+        } else {
+            modeMenuItems[i] = item.as<String>();
+        }
     }
   } else {
-      // Nếu không có đối tượng menu_text, tải toàn bộ giá trị mặc định
-      tabNames[0] = (app_settings->currentLang == "vi") ? "Cài đặt" : "Setting";
-      tabNames[1] = (app_settings->currentLang == "vi") ? "Chế độ" : "Mode";
-      if (app_settings->currentLang == "vi") {
-          for(int i=0; i<NUM_SETTING_ITEMS; i++) settingMenuItems[i] = default_settings_vi[i];
-          for(int i=0; i<NUM_MODE_ITEMS; i++) modeMenuItems[i] = default_modes_vi[i];
-      } else {
-          for(int i=0; i<NUM_SETTING_ITEMS; i++) settingMenuItems[i] = default_settings_en[i];
-          for(int i=0; i<NUM_MODE_ITEMS; i++) modeMenuItems[i] = default_modes_en[i];
-      }
+      tabNames[0] = FPSTR((app_settings->currentLang == "vi") ? TAB_SETTING_VI : TAB_SETTING_EN);
+      tabNames[1] = FPSTR((app_settings->currentLang == "vi") ? TAB_MODE_VI : TAB_MODE_EN);
+      for(int i=0; i<NUM_SETTING_ITEMS_CONST; i++) settingMenuItems[i] = FPSTR(pgm_read_ptr(&settings_pgm[i]));
+      for(int i=0; i<NUM_MODE_ITEMS_CONST; i++) modeMenuItems[i] = FPSTR(pgm_read_ptr(&modes_pgm[i]));
   }
 }
 
@@ -132,7 +135,7 @@ static void draw_setting_value(int itemIndex, int x, int y, int w, uint16_t text
 
 static void draw_menu_internal() {
   fontTargetSprite = screenSprite;
-  
+
   screenSprite->fillSprite(TFT_BLACK);
   const int tabHeight = 30;
   // *** SỬA LỖI: Sử dụng tft. thay vì tft-> ***
@@ -151,8 +154,11 @@ static void draw_menu_internal() {
     int textX;
     if (app_settings->displayShape == SHAPE_ROUND) {
       int padding = 5;
-      if (i == 0) { textX = screen_center_x - textW - padding; } 
-      else { textX = screen_center_x + padding; }
+      if (i == 0) {
+        textX = screen_center_x - textW - padding;
+      } else {
+        textX = screen_center_x + padding;
+      }
     } else {
       textX = tabX + (tabWidth - textW) / 2;
     }
@@ -161,15 +167,15 @@ static void draw_menu_internal() {
 
   // Draw menu items
   String* currentItems = (currentTab == TAB_SETTING) ? settingMenuItems : modeMenuItems;
-  int numItems = (currentTab == TAB_SETTING) ? NUM_SETTING_ITEMS : NUM_MODE_ITEMS;
-  
+  int numItems = (currentTab == TAB_SETTING) ? NUM_SETTING_ITEMS_CONST : NUM_MODE_ITEMS_CONST;
+
   int visibleItems = (temp_settings.displayShape == SHAPE_ROUND) ? 5 : 6;
   const int listHeight = tft.height() - tabHeight - 10;
   const int itemHeight = 28;
   const int totalItemsHeight = visibleItems * itemHeight;
   const int itemSpacing = (visibleItems > 1) ? (listHeight - totalItemsHeight) / (visibleItems - 1) : 0;
   const int startY = tabHeight + 5;
-  
+
   if (temp_settings.displayShape == SHAPE_ROUND) {
     const int centerSlot = visibleItems / 2;
     int firstItemLogicalIndex = selectedMenuItem - centerSlot;
@@ -181,15 +187,21 @@ static void draw_menu_internal() {
       uint16_t bgColor = isSelected ? TFT_BLUE : TFT_BLACK;
       uint16_t textColor = isSelected ? TFT_WHITE : TFT_LIGHTGREY;
       if (currentEditMode != EDIT_NONE && isSelected) bgColor = TFT_RED;
-      
+
       int itemX = 5, itemW = tft.width() - 10;
       int itemCenterY = currentY + (itemHeight / 2);
       int d = abs(screen_radius - itemCenterY);
       if (d < screen_radius) {
         int w_half = sqrt(screen_radius * screen_radius - d * d) - 5;
-        if (w_half > 0) { itemW = w_half * 2; itemX = screen_center_x - w_half; } 
-        else { itemW = 0; }
-      } else { itemW = 0; }
+        if (w_half > 0) {
+          itemW = w_half * 2;
+          itemX = screen_center_x - w_half;
+        } else {
+          itemW = 0;
+        }
+      } else {
+        itemW = 0;
+      }
 
       if (itemW > 0) {
         screenSprite->fillRoundRect(itemX, currentY - 4, itemW, itemHeight + 2, 5, bgColor);
@@ -199,7 +211,7 @@ static void draw_menu_internal() {
         if (currentTab == TAB_SETTING) draw_setting_value(itemIndex, itemX, currentY, itemW, textColor, bgColor);
       }
     }
-  } else { // SHAPE_SQUARE
+  } else {  // SHAPE_SQUARE
     for (int i = 0; i < visibleItems; i++) {
       int itemIndex = menuScrollOffset + i;
       if (itemIndex >= numItems) break;
@@ -209,7 +221,7 @@ static void draw_menu_internal() {
       uint16_t bgColor = isSelected ? TFT_BLUE : TFT_BLACK;
       uint16_t textColor = isSelected ? TFT_WHITE : TFT_LIGHTGREY;
       if (currentEditMode != EDIT_NONE && isSelected) bgColor = TFT_RED;
-      
+
       int itemX = 5, itemW = tft.width() - 10;
       screenSprite->fillRoundRect(itemX, currentY - 4, itemW, itemHeight + 2, 5, bgColor);
       String title = currentItems[itemIndex];
@@ -228,13 +240,25 @@ Mode menu_handle_action(ButtonAction action) {
   if (currentEditMode != EDIT_NONE) {
     if (action == ACTION_SINGLE) {
       switch (currentEditMode) {
-        case EDIT_SPEED: temp_settings.frameDelay += 5; if (temp_settings.frameDelay > 50) temp_settings.frameDelay = 0; break;
+        case EDIT_SPEED:
+          temp_settings.frameDelay += 5;
+          if (temp_settings.frameDelay > 50) temp_settings.frameDelay = 0;
+          break;
         case EDIT_ROTATION: temp_settings.currentRotation = (temp_settings.currentRotation + 1) % 4; break;
         case EDIT_LANGUAGE: temp_settings.currentLang = (temp_settings.currentLang == "vi") ? "en" : "vi"; break;
-        case EDIT_NOTIF_TIME: temp_settings.notificationTimeout++; if (temp_settings.notificationTimeout > 10) temp_settings.notificationTimeout = 3; break;
-        case EDIT_MARQUEE_SPEED: temp_settings.marqueeSpeed -= 5; if (temp_settings.marqueeSpeed < 10) temp_settings.marqueeSpeed = 50; break;
+        case EDIT_NOTIF_TIME:
+          temp_settings.notificationTimeout++;
+          if (temp_settings.notificationTimeout > 10) temp_settings.notificationTimeout = 3;
+          break;
+        case EDIT_MARQUEE_SPEED:
+          temp_settings.marqueeSpeed -= 5;
+          if (temp_settings.marqueeSpeed < 10) temp_settings.marqueeSpeed = 50;
+          break;
         case EDIT_SOUND_ENABLED: temp_settings.soundEnabled = !temp_settings.soundEnabled; break;
-        case EDIT_VOLUME: temp_settings.volume += 5; if (temp_settings.volume > 30) temp_settings.volume = 0; break;
+        case EDIT_VOLUME:
+          temp_settings.volume += 5;
+          if (temp_settings.volume > 30) temp_settings.volume = 0;
+          break;
         case EDIT_AUTOPLAY: temp_settings.musicAutoPlayNext = !temp_settings.musicAutoPlayNext; break;
         case EDIT_BLUETOOTH: temp_settings.bluetoothEnabled = !temp_settings.bluetoothEnabled; break;
         case EDIT_DISPLAY_SHAPE: temp_settings.displayShape = (temp_settings.displayShape == SHAPE_SQUARE) ? SHAPE_ROUND : SHAPE_SQUARE; break;
@@ -249,7 +273,7 @@ Mode menu_handle_action(ButtonAction action) {
       selectedMenuItem = 0;
       menuScrollOffset = 0;
     } else if (action == ACTION_SINGLE) {
-      int maxItems = (currentTab == TAB_SETTING) ? NUM_SETTING_ITEMS : NUM_MODE_ITEMS;
+      int maxItems = (currentTab == TAB_SETTING) ? NUM_SETTING_ITEMS_CONST : NUM_MODE_ITEMS_CONST;
       selectedMenuItem = (selectedMenuItem + 1) % maxItems;
       int maxVisibleItems = (temp_settings.displayShape == SHAPE_ROUND) ? 5 : 6;
 
@@ -258,11 +282,11 @@ Mode menu_handle_action(ButtonAction action) {
         menuScrollOffset = selectedMenuItem - centerSlot;
         if (menuScrollOffset < 0) menuScrollOffset = 0;
         if (maxItems > maxVisibleItems) {
-            if (menuScrollOffset > maxItems - maxVisibleItems) {
-                menuScrollOffset = maxItems - maxVisibleItems;
-            }
+          if (menuScrollOffset > maxItems - maxVisibleItems) {
+            menuScrollOffset = maxItems - maxVisibleItems;
+          }
         } else {
-            menuScrollOffset = 0;
+          menuScrollOffset = 0;
         }
       } else {
         if (selectedMenuItem == 0) menuScrollOffset = 0;
@@ -318,4 +342,3 @@ int menu_manager_get_temp_rotation() {
 bool menu_manager_save_triggered() {
   return save_was_triggered;
 }
-
