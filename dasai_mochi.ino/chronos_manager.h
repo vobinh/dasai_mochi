@@ -17,6 +17,17 @@ struct WeatherData {
   int uv;
 };
 
+enum NavInstructionType {
+    NAV_UNKNOWN,
+    NAV_STRAIGHT,
+    NAV_TURN_LEFT,
+    NAV_TURN_RIGHT,
+    NAV_SHARP_LEFT,
+    NAV_SHARP_RIGHT,
+    NAV_ROUNDABOUT,
+    NAV_ARRIVED
+};
+
 enum ChronosAction {
   CHRONOS_ACTION_NONE,
   CHRONOS_ACTION_SAVE_SETTINGS,

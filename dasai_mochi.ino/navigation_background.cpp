@@ -1,27 +1,27 @@
 #include "navigation_background.h"
-
-// =======================================================================================
-//  Triển khai (Implementation)
-// =======================================================================================
+#include <cmath>
 
 namespace NavigationBackground {
+
+// Enum nội bộ để quản lý trạng thái animation
+enum AnimState {
+    STATE_STRAIGHT,
+    STATE_TURNING_LEFT,
+    STATE_TURNING_RIGHT
+};
 
 // ---- Cấu hình & Hằng số ----
 static const int SCREEN_W = 240;
 static const int SCREEN_H = 240;
-static const int LANES    = 3;
 static const int ROAD_W   = 150;
 static const int ROAD_X   = (SCREEN_W - ROAD_W) / 2;
-static const int LANE_W   = ROAD_W / LANES;
-static const int LANE_X[LANES] = { ROAD_X + LANE_W/2, ROAD_X + LANE_W + LANE_W/2, ROAD_X + 2*LANE_W + LANE_W/2 };
-
+static const int LANE_W   = ROAD_W / 3;
 static const int CAR_W = 28;
 static const int CAR_H = 45;
 static const int CAR_Y = SCREEN_H - CAR_H - 10;
-
-static const uint16_t COL_GRASS_DAY = 0x0400; 
+static const uint16_t COL_GRASS_DAY = 0x0400;
 static const uint16_t COL_GRASS_NIGHT = 0x0200;
-static const uint16_t COL_ROAD_DAY  = 0x4228; 
+static const uint16_t COL_ROAD_DAY  = 0x4228;
 static const uint16_t COL_ROAD_NIGHT = 0x2124;
 static const uint16_t COL_LINE  = TFT_DARKGREY;
 static const uint16_t COL_CAR   = TFT_CYAN;
@@ -29,27 +29,25 @@ static const uint16_t COL_CAR   = TFT_CYAN;
 // ---- Trạng thái ----
 struct Streetlight { int x; int y; bool active; bool is_left; };
 static const int MAX_STREETLIGHTS = 4;
-
 static TFT_eSprite* _sprite = nullptr;
 static Streetlight streetlights[MAX_STREETLIGHTS];
-static int currentSpeedPx = 4;
 static int lineOffset = 0; 
-static uint8_t playerLane = 1;
+static AnimState current_anim_state = STATE_STRAIGHT;
+static float animation_progress = 1.0f; // 0.0 -> 1.0
+static float player_rotation = 0.0f;
+static float player_x_offset = 0.0f;
+static int anim_speed = 4;
 
 // ---- Các hàm nội bộ ----
-static inline int laneCenterX(int lane){ return LANE_X[lane]; }
-
-static void drawDetailedCar(int x, int y, uint16_t bodyColor, bool lights_on) {
-    _sprite->fillRoundRect(x, y, CAR_W, CAR_H, 6, bodyColor);
-    _sprite->fillRoundRect(x + 2, y + 5, CAR_W - 4, 10, 4, TFT_DARKGREY);
-    _sprite->fillRoundRect(x + 4, y + 8, CAR_W - 8, 18, 4, TFT_SKYBLUE);
-    
+static void drawDetailedCar(TFT_eSprite* s, int x, int y, uint16_t bodyColor, bool lights_on) {
+    s->fillRoundRect(x, y, CAR_W, CAR_H, 6, bodyColor);
+    s->fillRoundRect(x + 2, y + 5, CAR_W - 4, 10, 4, TFT_DARKGREY);
+    s->fillRoundRect(x + 4, y + 8, CAR_W - 8, 18, 4, TFT_SKYBLUE);
     uint16_t headlight_color = lights_on ? TFT_YELLOW : TFT_WHITE;
-    _sprite->fillRect(x, y + 4, 4, 6, headlight_color);
-    _sprite->fillRect(x + CAR_W - 4, y + 4, 4, 6, headlight_color);
-
-    _sprite->fillRect(x, y + CAR_H - 8, 4, 6, TFT_RED);
-    _sprite->fillRect(x + CAR_W - 4, y + CAR_H - 8, 4, 6, TFT_RED);
+    s->fillRect(x, y + 4, 4, 6, headlight_color);
+    s->fillRect(x + CAR_W - 4, y + 4, 4, 6, headlight_color);
+    s->fillRect(x, y + CAR_H - 8, 4, 6, TFT_RED);
+    s->fillRect(x + CAR_W - 4, y + CAR_H - 8, 4, 6, TFT_RED);
 }
 
 static void drawStreetlight(const Streetlight& light, bool is_on) {
@@ -80,7 +78,7 @@ static void drawStreetlight(const Streetlight& light, bool is_on) {
     }
 }
 
-static void spawnStreetlight(){
+static void spawnStreetlight() {
     static bool spawn_on_left = true;
     for(int i=0; i<MAX_STREETLIGHTS; i++) {
         if(!streetlights[i].active){
@@ -107,85 +105,125 @@ void begin(TFT_eSprite* sprite){
 
 void reset() {
     for(int i=0; i<MAX_STREETLIGHTS; i++) streetlights[i] = {0,0,false,false};
-    currentSpeedPx = 4;
+    current_anim_state = STATE_STRAIGHT;
+    animation_progress = 1.0f;
+    player_rotation = 0.0f;
+    player_x_offset = 0.0f;
+    anim_speed = 4;
 }
 
 void setSpeed(int speed) {
-    currentSpeedPx = speed;
+    anim_speed = speed;
+}
+
+void triggerAnimation(NavInstructionType type) {
+    if (animation_progress < 1.0f) return;
+
+    switch(type) {
+        case NAV_TURN_LEFT:
+            current_anim_state = STATE_TURNING_LEFT;
+            animation_progress = 0.0f;
+            break;
+        case NAV_TURN_RIGHT:
+            current_anim_state = STATE_TURNING_RIGHT;
+            animation_progress = 0.0f;
+            break;
+        default:
+            break;
+    }
 }
 
 void tick(){
-  if (currentSpeedPx > 0) {
-    lineOffset = (lineOffset + currentSpeedPx) % 32;
-    for(int i=0; i<MAX_STREETLIGHTS; i++) {
-        if(streetlights[i].active){
-          streetlights[i].y += currentSpeedPx;
-          if(streetlights[i].y > SCREEN_H + 20) { streetlights[i].active=false; }
+    if (animation_progress < 1.0f) {
+        animation_progress += 0.02f;
+        if (animation_progress >= 1.0f) {
+            current_anim_state = STATE_STRAIGHT;
+            reset(); 
         }
     }
-    
-    static unsigned long last_spawn = 0;
-    if (millis() - last_spawn > (1600 / (currentSpeedPx / 2.0f) )) {
-        last_spawn = millis();
-        spawnStreetlight();
+
+    if (current_anim_state == STATE_STRAIGHT && anim_speed > 0) {
+        lineOffset = (lineOffset + anim_speed) % 32;
+        for(int i=0; i<MAX_STREETLIGHTS; i++) {
+            if(streetlights[i].active){
+              streetlights[i].y += anim_speed;
+              if(streetlights[i].y > SCREEN_H + 20) { streetlights[i].active=false; }
+            }
+        }
+        static unsigned long last_spawn = 0;
+        if (millis() - last_spawn > (1600 / (anim_speed / 2.0f))) {
+            last_spawn = millis();
+            spawnStreetlight();
+        }
     }
-  }
 }
 
-// *** HÀM VẼ ĐÃ ĐƯỢC CẬP NHẬT VỚI HIỆU ỨNG ÁNH SÁNG MỀM MẠI HƠN ***
 void draw(TFT_eSprite* target_sprite, int current_hour) {
     _sprite = target_sprite;
     bool is_night = (current_hour >= 18 || current_hour < 6);
-
+    
     uint16_t grass_color = is_night ? COL_GRASS_NIGHT : COL_GRASS_DAY;
     uint16_t road_color = is_night ? COL_ROAD_NIGHT : COL_ROAD_DAY;
 
-    // 1. Vẽ các lớp nền
-    _sprite->fillRect(0, 0, ROAD_X, SCREEN_H, grass_color);
-    _sprite->fillRect(ROAD_X + ROAD_W, 0, SCREEN_W - (ROAD_X + ROAD_W), SCREEN_H, grass_color);
-    _sprite->fillRect(ROAD_X, 0, ROAD_W, SCREEN_H, road_color);
+    _sprite->fillRect(0, 0, SCREEN_W, SCREEN_H, grass_color);
     
-    // 2. Nếu là ban đêm, vẽ tất cả các hiệu ứng ánh sáng trên mặt đất trước
-    if (is_night) {
-        uint16_t ground_glow_color = _sprite->color565(100, 100, 0); // Đậm hơn
-        uint16_t beam_color = _sprite->color565(80, 80, 0);       // Nhạt hơn
+    float t = animation_progress;
+    float sin_t = sin(t * PI);
 
-        // 2a. Vẽ ánh sáng đèn đường trên mặt đất
-        for(int i=0; i<MAX_STREETLIGHTS; i++) {
-            if (streetlights[i].active) {
-                int lamp_x = streetlights[i].is_left ? (streetlights[i].x + 20) : (streetlights[i].x - 20);
-                // Chùm sáng tam giác nhạt hơn
-                _sprite->fillTriangle(lamp_x, streetlights[i].y - 50, lamp_x - 10, streetlights[i].y, lamp_x + 10, streetlights[i].y, ground_glow_color);
-                // Vầng elip đậm
-                _sprite->fillEllipse(lamp_x, streetlights[i].y, 25, 8, ground_glow_color);
-            }
+    // --- VẼ ĐƯỜNG ---
+    if (current_anim_state == STATE_TURNING_LEFT || current_anim_state == STATE_TURNING_RIGHT) {
+        float turn_direction = (current_anim_state == STATE_TURNING_LEFT) ? -1.0 : 1.0;
+        for(int y=0; y < SCREEN_H; y++) {
+            float perspective = (float)y / SCREEN_H;
+            float curve = sin_t * (1.0 - perspective) * 80.0 * turn_direction;
+            _sprite->drawFastHLine(ROAD_X - (perspective * 50) + curve, y, ROAD_W + (perspective * 100), road_color);
         }
-
-        // 2b. Vẽ ánh sáng đèn pha xe trên mặt đất (phiên bản cải tiến)
-        int player_center_x = laneCenterX(playerLane);
-        int beam_y_start = CAR_Y;
-        int beam_y_end = 80; // Điểm cuối của chùm sáng
-
-        // Vẽ nhiều lớp elip để tạo hiệu ứng mềm mại
-        _sprite->fillEllipse(player_center_x, beam_y_start - 5, 20, 15, _sprite->color565(120, 120, 0)); // Lớp sáng nhất, gần xe nhất
-        _sprite->fillEllipse(player_center_x, beam_y_start - 20, 35, 30, ground_glow_color);
-        _sprite->fillEllipse(player_center_x, beam_y_start - 45, 50, 45, beam_color); // Lớp rộng nhất, mờ nhất
-    }
-    
-    // 3. Vẽ vạch kẻ đường (đè lên trên các vầng sáng)
-    for(int i = 1; i < LANES; i++){
-      int x = ROAD_X + i * LANE_W;
-      for(int y = lineOffset - 32; y < SCREEN_H; y += 32){ 
-        _sprite->drawFastVLine(x, y, 16, COL_LINE); 
-      }
+    } else {
+         _sprite->fillRect(ROAD_X, 0, ROAD_W, SCREEN_H, road_color);
+         if (is_night) {
+             int player_center_x = ROAD_X + ROAD_W / 2;
+             _sprite->fillEllipse(player_center_x, CAR_Y - 45, 55, 50, _sprite->color565(80, 80, 0));
+             _sprite->fillEllipse(player_center_x, CAR_Y - 35, 40, 40, _sprite->color565(120, 120, 0));
+             _sprite->fillEllipse(player_center_x, CAR_Y - 25, 25, 30, _sprite->color565(180, 180, 0));
+             _sprite->fillEllipse(player_center_x, CAR_Y - 15, 15, 20, TFT_YELLOW);
+         }
+         for(int i = 1; i < 3; i++){
+           int x = ROAD_X + i * LANE_W;
+           for(int y = lineOffset - 32; y < SCREEN_H; y += 32){ 
+             _sprite->drawFastVLine(x, y, 16, COL_LINE); 
+           }
+         }
     }
 
-    // 4. Vẽ các cột đèn đường
+    // --- VẼ ĐÈN ĐƯỜNG VÀ XE ---
     for(int i=0; i<MAX_STREETLIGHTS; i++) drawStreetlight(streetlights[i], is_night);
     
-    // 5. Vẽ xe của người chơi (lớp trên cùng)
-    int playerX = laneCenterX(playerLane) - CAR_W/2;
-    drawDetailedCar(playerX, CAR_Y, COL_CAR, is_night);
+    player_rotation = 45.0f * sin_t * ((current_anim_state == STATE_TURNING_LEFT) ? -1.0 : 1.0);
+    player_x_offset = (float)LANE_W * sin_t * ((current_anim_state == STATE_TURNING_LEFT) ? -1.0 : 1.0);
+    int playerX = ROAD_X + ROAD_W/2 - CAR_W/2 + player_x_offset;
+    
+    TFT_eSprite carSprite(&tft);
+    carSprite.createSprite(CAR_W, CAR_H);
+    carSprite.fillSprite(TFT_BLACK);
+
+    drawDetailedCar(&carSprite, 0, 0, COL_CAR, is_night);
+    
+    carSprite.setPivot(CAR_W / 2, CAR_H / 2);
+
+    int max_dim = sqrt(CAR_W * CAR_W + CAR_H * CAR_H) + 2;
+    TFT_eSprite rotatedCanvas(&tft);
+    rotatedCanvas.createSprite(max_dim, max_dim);
+    rotatedCanvas.fillSprite(TFT_BLACK); 
+    rotatedCanvas.setPivot(max_dim / 2, max_dim / 2);
+
+    carSprite.pushRotated(&rotatedCanvas, player_rotation, TFT_BLACK);
+
+    int finalX = playerX - (max_dim - CAR_W) / 2;
+    int finalY = CAR_Y - (max_dim - CAR_H) / 2;
+    rotatedCanvas.pushToSprite(target_sprite, finalX, finalY, TFT_BLACK);
+    
+    carSprite.deleteSprite();
+    rotatedCanvas.deleteSprite();
 }
 
 } // namespace NavigationBackground

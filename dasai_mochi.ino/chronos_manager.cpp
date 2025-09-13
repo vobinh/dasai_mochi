@@ -13,6 +13,13 @@ static MakeFont *_font;
 static AppSettings *_settings;
 static ChronosESP32 Chronos("Mochi Watch");
 
+// *** BIẾN MỚI ĐỂ QUẢN LÝ KÍCH HOẠT ANIMATION ***
+static NavInstructionType last_instruction_sent_to_anim = NAV_UNKNOWN;
+static bool has_played_turn_anim = false;
+static uint32_t last_nav_crc = 0;
+static bool is_arrived = false;
+static int current_nav_speed = 4;
+
 extern TFT_eSprite *fontTargetSprite;
 
 static Notification latestNotification;
@@ -41,11 +48,10 @@ static WeatherData latestWeather;
 static bool hasWeatherData = false;
 static ChronosAction requested_action = CHRONOS_ACTION_NONE;
 
-enum NavTimeOverride { TIME_AUTO, TIME_MANUAL_DAY, TIME_MANUAL_NIGHT };
+enum NavTimeOverride { TIME_AUTO,
+                       TIME_MANUAL_DAY,
+                       TIME_MANUAL_NIGHT };
 static NavTimeOverride navTimeOverride = TIME_AUTO;
-
-static bool is_arrived = false;
-static int current_nav_speed = 4;
 
 // *** BIẾN MỚI CHO HIỆU ỨNG CHỮ CHẠY DỌC ***
 struct RoadText {
@@ -60,6 +66,61 @@ static unsigned long last_text_spawn_time = 0;
 static unsigned int text_spawn_interval = 2000;  // ms giữa mỗi lần xuất hiện
 static String current_nav_title_for_anim = "";
 static int nav_anim_speed = 4;  // Tốc độ cuộn của chữ
+
+
+void chronos_debug_trigger_animation() {
+    // Chỉ hoạt động khi đang ở chế độ chỉ đường
+    if (!hasNewNavigation) return;
+
+    static int debug_anim_counter = 0;
+    debug_anim_counter = (debug_anim_counter + 1) % 2; // Chuyển đổi giữa 0 và 1
+
+    if (debug_anim_counter == 0) {
+        NavigationBackground::triggerAnimation(NAV_TURN_LEFT);
+    } else {
+        NavigationBackground::triggerAnimation(NAV_TURN_RIGHT);
+    }
+}
+
+// *** HÀM MỚI: PHÂN TÍCH VĂN BẢN ĐỂ LẤY LOẠI CHỈ DẪN ***
+static NavInstructionType get_nav_instruction_type(String text) {
+  text.toLowerCase();
+  Serial.println("get_nav_instruction_type: ");
+  Serial.println(text);
+
+  if (text.indexOf("đã đến") > -1 || text.indexOf("arrived") > -1) return NAV_ARRIVED;
+  if (text.indexOf("Đông") > -1 || text.indexOf("hướng Đông") > -1) return NAV_SHARP_LEFT;
+  if (text.indexOf("tần") > -1 || text.indexOf("thị tần") > -1) return NAV_SHARP_RIGHT;
+  if (text.indexOf("thế hiển") > -1 || text.indexOf("phạm thế hiển") > -1 || text.indexOf("turn left") > -1) return NAV_TURN_LEFT;
+  if (text.indexOf("nam") > -1 || text.indexOf("dạ nam") > -1 || text.indexOf("turn right") > -1) return NAV_TURN_RIGHT;
+  if (text.indexOf("vòng xuyến") > -1 || text.indexOf("bùng binh") > -1 || text.indexOf("roundabout") > -1) return NAV_ROUNDABOUT;
+  if (text.indexOf("đi thẳng") > -1 || text.indexOf("continue") > -1 || text.indexOf("head") > -1) return NAV_STRAIGHT;
+
+  return NAV_UNKNOWN;
+}
+
+
+// *** HÀM MỚI: XỬ LÝ VIỆC KÍCH HOẠT ANIMATION ***
+static void handle_navigation_animation(float distance, uint32_t crc) {
+  const int TURN_TRIGGER_DISTANCE = 30;  // Kích hoạt animation khi còn cách 30 mét
+
+  NavInstructionType currentInstruction = get_nav_instruction_type(latestNavigation.directions);
+    Serial.println("get_nav: ");
+  Serial.println(currentInstruction);
+  // Nếu chỉ dẫn thay đổi, reset lại cờ để sẵn sàng cho animation tiếp theo
+  if (crc != last_nav_crc) {
+    has_played_turn_anim = false;
+    last_nav_crc = crc;
+  }
+
+  // Kích hoạt animation khi đến gần điểm rẽ và chưa kích hoạt lần nào cho chỉ dẫn này
+  if (distance < TURN_TRIGGER_DISTANCE && !has_played_turn_anim) {
+    if (currentInstruction == NAV_TURN_LEFT || currentInstruction == NAV_TURN_RIGHT) {
+      NavigationBackground::triggerAnimation(currentInstruction);
+      has_played_turn_anim = true;  // Đánh dấu đã kích hoạt
+    }
+  }
+}
 
 // --- CÁC HÀM NỘI BỘ ---
 static void syncTimeToRTC() {
@@ -234,6 +295,13 @@ static void configCallback(Config config, uint32_t a, uint32_t b) {
           nav_icon_crc = tempNav.iconCRC;
           latestNavigation = tempNav;
           hasNewNavigation = true;
+
+          // Kiểm tra xem có phải là icon "Đã đến" không
+          String dirs = latestNavigation.directions;
+          dirs.toLowerCase();
+          if (dirs.indexOf("đã đến") > -1 || dirs.indexOf("arrived") > -1) {
+            is_arrived = true;
+          }
         }
       }
       break;
@@ -310,6 +378,17 @@ bool chronos_draw_alerts(ButtonAction action) {
       navTimeOverride = (NavTimeOverride)((navTimeOverride + 1) % 3);  // Chuyển vòng qua 3 trạng thái
     }
 
+    if (action == ACTION_DOUBLE) {
+        static int debug_anim_counter = 0;
+        debug_anim_counter = (debug_anim_counter + 1) % 2; // Chuyển đổi giữa 0 và 1
+
+        if (debug_anim_counter == 0) {
+            NavigationBackground::triggerAnimation(NAV_TURN_LEFT);
+        } else {
+            NavigationBackground::triggerAnimation(NAV_TURN_RIGHT);
+        }
+    }
+
     // Xác định giờ hiệu lực để vẽ
     int effective_hour;
     if (navTimeOverride == TIME_AUTO) {
@@ -382,6 +461,9 @@ bool chronos_draw_alerts(ButtonAction action) {
     distStr.replace(",", ".");
     if (distStr.indexOf("k") > -1) distanceInMeters = distStr.toFloat() * 1000;
     else distanceInMeters = distStr.toFloat();
+
+    // *** HOÀN THIỆN LOGIC KÍCH HOẠT ANIMATION ***
+    handle_navigation_animation(distanceInMeters, nav_icon_crc);
 
     uint16_t iconColor = TFT_WHITE;
     bool shouldBlink = false;
