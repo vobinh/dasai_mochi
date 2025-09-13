@@ -14,11 +14,13 @@ static AppSettings *_settings;
 static ChronosESP32 Chronos("Mochi Watch");
 
 // *** BIẾN MỚI ĐỂ QUẢN LÝ KÍCH HOẠT ANIMATION ***
-static NavInstructionType last_instruction_sent_to_anim = NAV_UNKNOWN;
+// static NavInstructionType last_instruction_sent_to_anim = NAV_UNKNOWN;
+static String last_nav_directions_text = "";
 static bool has_played_turn_anim = false;
 static uint32_t last_nav_crc = 0;
 static bool is_arrived = false;
 static int current_nav_speed = 4;
+static NavDirectionID latest_nav_direction_id = DirectionNone;
 
 extern TFT_eSprite *fontTargetSprite;
 
@@ -68,58 +70,77 @@ static String current_nav_title_for_anim = "";
 static int nav_anim_speed = 4;  // Tốc độ cuộn của chữ
 
 
+static NavDirectionID map_crc_to_direction_id(uint32_t crc) {
+  Serial.println("crc: ");
+  Serial.printf("0x%04X\n", crc);
+  if (crc == 0xE15D3531 || crc == 0x9F417DA0) return DirectionLeft;
+  if (crc == 0xBC7CAA8A || crc == 0x65D324CE) return DirectionRight;
+  if (crc == 0xE324CE84 || crc == 0x77A464B0) return DirectionStraight;
+  if (crc == 0xF3CCE64A) return DirectionRoundaboutRSE;
+  if (crc == 0x4E492E6) return DirectionRoundaboutRE;
+  if (crc == 0x56910207) return DirectionRoundaboutRNE;
+  if (crc == 0xF98F61) return DirectionRoundaboutRN;
+  if (crc == 0x6F6DF52A || crc == 0x127B26BB) return DirectionEasyRight;
+  if (crc == 0xB18135CE) return DirectionUTurnRight;
+  // Thêm các giá trị CRC khác ở đây nếu cần
+  return DirectionNone;
+  // 0x28058C45
+}
+
+static NavInstructionType get_nav_instruction_type(NavDirectionID dir_id) {
+  switch (dir_id) {
+    case DirectionEasyLeft:
+    case DirectionKeepLeft:
+    case DirectionLeft:
+    case DirectionExitLeft: return NAV_TURN_LEFT;
+    case DirectionEasyRight:
+    case DirectionKeepRight:
+    case DirectionRight:
+    case DirectionExitRight: return NAV_TURN_RIGHT;
+    case DirectionSharpLeft: return NAV_SHARP_LEFT;
+    case DirectionSharpRight: return NAV_SHARP_RIGHT;
+    case DirectionStraight:
+    case DirectionFollow: return NAV_STRAIGHT;
+    case DirectionEnd: return NAV_ARRIVED;
+    case DirectionUTurnRight:  // *** THÊM LOGIC XỬ LÝ QUAY ĐẦU ***
+    case DirectionUTurnLeft:
+      return NAV_U_TURN;
+    default:
+      if (dir_id >= DirectionRoundaboutRSE && dir_id <= DirectionRoundaboutLS) return NAV_ROUNDABOUT;
+      return NAV_UNKNOWN;
+  }
+}
+
 void chronos_debug_trigger_animation() {
-    // Chỉ hoạt động khi đang ở chế độ chỉ đường
-    if (!hasNewNavigation) return;
+  // Chỉ hoạt động khi đang ở chế độ chỉ đường
+  if (!hasNewNavigation) return;
 
-    static int debug_anim_counter = 0;
-    debug_anim_counter = (debug_anim_counter + 1) % 2; // Chuyển đổi giữa 0 và 1
+  static int debug_anim_counter = 0;
+  debug_anim_counter = (debug_anim_counter + 1) % 2;  // Chuyển đổi giữa 0 và 1
 
-    if (debug_anim_counter == 0) {
-        NavigationBackground::triggerAnimation(NAV_TURN_LEFT);
-    } else {
-        NavigationBackground::triggerAnimation(NAV_TURN_RIGHT);
-    }
+  if (debug_anim_counter == 0) {
+    NavigationBackground::triggerAnimation(NAV_TURN_LEFT);
+  } else {
+    NavigationBackground::triggerAnimation(NAV_TURN_RIGHT);
+  }
 }
 
-// *** HÀM MỚI: PHÂN TÍCH VĂN BẢN ĐỂ LẤY LOẠI CHỈ DẪN ***
-static NavInstructionType get_nav_instruction_type(String text) {
-  text.toLowerCase();
-  Serial.println("get_nav_instruction_type: ");
-  Serial.println(text);
+static void handle_navigation_animation(float distance) {
+    const int TURN_TRIGGER_DISTANCE = 30;
+    NavInstructionType currentInstruction = get_nav_instruction_type(latest_nav_direction_id);
 
-  if (text.indexOf("đã đến") > -1 || text.indexOf("arrived") > -1) return NAV_ARRIVED;
-  if (text.indexOf("Đông") > -1 || text.indexOf("hướng Đông") > -1) return NAV_SHARP_LEFT;
-  if (text.indexOf("tần") > -1 || text.indexOf("thị tần") > -1) return NAV_SHARP_RIGHT;
-  if (text.indexOf("thế hiển") > -1 || text.indexOf("phạm thế hiển") > -1 || text.indexOf("turn left") > -1) return NAV_TURN_LEFT;
-  if (text.indexOf("nam") > -1 || text.indexOf("dạ nam") > -1 || text.indexOf("turn right") > -1) return NAV_TURN_RIGHT;
-  if (text.indexOf("vòng xuyến") > -1 || text.indexOf("bùng binh") > -1 || text.indexOf("roundabout") > -1) return NAV_ROUNDABOUT;
-  if (text.indexOf("đi thẳng") > -1 || text.indexOf("continue") > -1 || text.indexOf("head") > -1) return NAV_STRAIGHT;
-
-  return NAV_UNKNOWN;
-}
-
-
-// *** HÀM MỚI: XỬ LÝ VIỆC KÍCH HOẠT ANIMATION ***
-static void handle_navigation_animation(float distance, uint32_t crc) {
-  const int TURN_TRIGGER_DISTANCE = 30;  // Kích hoạt animation khi còn cách 30 mét
-
-  NavInstructionType currentInstruction = get_nav_instruction_type(latestNavigation.directions);
-    Serial.println("get_nav: ");
-  Serial.println(currentInstruction);
-  // Nếu chỉ dẫn thay đổi, reset lại cờ để sẵn sàng cho animation tiếp theo
-  if (crc != last_nav_crc) {
-    has_played_turn_anim = false;
-    last_nav_crc = crc;
-  }
-
-  // Kích hoạt animation khi đến gần điểm rẽ và chưa kích hoạt lần nào cho chỉ dẫn này
-  if (distance < TURN_TRIGGER_DISTANCE && !has_played_turn_anim) {
-    if (currentInstruction == NAV_TURN_LEFT || currentInstruction == NAV_TURN_RIGHT) {
-      NavigationBackground::triggerAnimation(currentInstruction);
-      has_played_turn_anim = true;  // Đánh dấu đã kích hoạt
+    if (latestNavigation.directions != last_nav_directions_text) {
+        has_played_turn_anim = false;
+        last_nav_directions_text = latestNavigation.directions;
     }
-  }
+
+    if (distance < TURN_TRIGGER_DISTANCE && !has_played_turn_anim) {
+        // *** THÊM NAV_U_TURN VÀO ĐIỀU KIỆN KÍCH HOẠT ***
+        if (currentInstruction == NAV_TURN_LEFT || currentInstruction == NAV_TURN_RIGHT || currentInstruction == NAV_U_TURN) {
+            NavigationBackground::triggerAnimation(currentInstruction);
+            has_played_turn_anim = true;
+        }
+    }
 }
 
 // --- CÁC HÀM NỘI BỘ ---
@@ -286,10 +307,16 @@ static void configCallback(Config config, uint32_t a, uint32_t b) {
       } else {
         hasNewNavigation = false;
         navTimeOverride = TIME_AUTO;
+        last_nav_directions_text = "";
       }
       break;
     case CF_NAV_ICON:
       if (a == 2) {
+        latest_nav_direction_id = map_crc_to_direction_id(b);
+        Serial.println("latest_nav_direction_id: ");
+        Serial.println(latest_nav_direction_id);
+        Serial.println("latest_id: ");
+        Serial.println(b);
         Navigation tempNav = Chronos.getNavigation();
         if (nav_icon_crc != tempNav.iconCRC) {
           nav_icon_crc = tempNav.iconCRC;
@@ -379,14 +406,16 @@ bool chronos_draw_alerts(ButtonAction action) {
     }
 
     if (action == ACTION_DOUBLE) {
-        static int debug_anim_counter = 0;
-        debug_anim_counter = (debug_anim_counter + 1) % 2; // Chuyển đổi giữa 0 và 1
-
-        if (debug_anim_counter == 0) {
-            NavigationBackground::triggerAnimation(NAV_TURN_LEFT);
-        } else {
-            NavigationBackground::triggerAnimation(NAV_TURN_RIGHT);
-        }
+      static int debug_anim_counter = 0;
+      debug_anim_counter = (debug_anim_counter + 1) % 3;  // Chuyển đổi giữa 0 và 1
+      Serial.println("debug_anim_counter: " + debug_anim_counter);
+      if (debug_anim_counter == 0) {
+        NavigationBackground::triggerAnimation(NAV_TURN_LEFT);
+      } else if (debug_anim_counter == 1) {
+        NavigationBackground::triggerAnimation(NAV_TURN_LEFT);
+      } else {
+        NavigationBackground::triggerAnimation(NAV_U_TURN);
+      }
     }
 
     // Xác định giờ hiệu lực để vẽ
@@ -463,7 +492,7 @@ bool chronos_draw_alerts(ButtonAction action) {
     else distanceInMeters = distStr.toFloat();
 
     // *** HOÀN THIỆN LOGIC KÍCH HOẠT ANIMATION ***
-    handle_navigation_animation(distanceInMeters, nav_icon_crc);
+    handle_navigation_animation(distanceInMeters);
 
     uint16_t iconColor = TFT_WHITE;
     bool shouldBlink = false;
