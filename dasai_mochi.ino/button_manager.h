@@ -33,7 +33,7 @@ void button_init() {
     Serial.println("Button Type: Touch (TTP223) detected.");
     activeButtonState = HIGH;
     // *** NÚT CẢM ỨNG CẦN THỜI GIAN CHỐNG NHIỄU DÀI HƠN ***
-    activeDebounceDelay = 8;  // 8ms
+    activeDebounceDelay = 5;  // 5ms
     pinMode(BUTTON_PIN, INPUT);
   } else {
     Serial.println("Button Type: Physical detected.");
@@ -56,64 +56,83 @@ bool is_button_held() {
  * Hoạt động với cả nút cơ và nút cảm ứng đã được nhận diện.
  */
 ButtonAction getButtonAction() {
-  static int lastState = HIGH;
-  static int currentState;
-  static unsigned long lastDebounceTime = 0;
+  // --- Trạng thái nút ---
+  enum BtnState { IDLE, PRESSING, HELD, RELEASING };
+  static BtnState btnState = IDLE;
 
   static int clickCount = 0;
-  static unsigned long lastClickTime = 0;
-  static unsigned long multiClickWindow = 500;
-  static unsigned long longPressTime = 700;
   static unsigned long pressTime = 0;
+  static unsigned long releaseTime = 0;
+
+  const unsigned long longPressTime = 700;    // >700ms = LONG
+  const unsigned long multiClickWindow = 600; // thời gian gom click
 
   ButtonAction action = ACTION_NONE;
-  int reading = digitalRead(BUTTON_PIN);
 
-  if (reading != lastState) {
-    lastDebounceTime = millis();
-  }
+  // --- Đọc trạng thái nút ---
+  bool isPressed = (digitalRead(BUTTON_PIN) == activeButtonState);
 
-  // *** SỬ DỤNG BIẾN CHỐNG NHIỄU LINH HOẠT ***
-  if ((millis() - lastDebounceTime) > activeDebounceDelay) {
-    if (reading != currentState) {
-      currentState = reading;
-      if (currentState == activeButtonState) {
-        clickCount++;
+  switch (btnState) {
+    case IDLE:
+      if (isPressed) {
+        btnState = PRESSING;
         pressTime = millis();
-        Serial.println("NHAN");
-      } else {
-        lastClickTime = millis();
-        Serial.println("NHA");
+        Serial.println("[BTN] → PRESSING");
       }
-    }
+      break;
+
+    case PRESSING:
+      if (!isPressed) {
+        // Nhả nhanh => click ngắn
+        btnState = RELEASING;
+        releaseTime = millis();
+        clickCount++;
+        Serial.printf("[BTN] RELEASE -> clickCount=%d\n", clickCount);
+      } else if (millis() - pressTime > longPressTime) {
+        // Nhấn giữ lâu
+        action = ACTION_LONG;
+        clickCount = 0;
+        btnState = HELD;
+        Serial.println("[BTN] ACTION_LONG");
+      }
+      break;
+
+    case HELD:
+      if (!isPressed) {
+        btnState = IDLE;  // reset sau khi thả
+        Serial.println("[BTN] HELD → IDLE");
+      }
+      break;
+
+    case RELEASING:
+      if (isPressed) {
+        // Lại bấm tiếp
+        btnState = PRESSING;
+        pressTime = millis();
+        Serial.println("[BTN] RE-PRESS → PRESSING");
+      } else if (millis() - releaseTime > multiClickWindow) {
+        // Hết thời gian gom click -> xác nhận loại click
+        if (clickCount == 1) {
+          action = ACTION_SINGLE;
+          Serial.println("[BTN] ACTION_SINGLE");
+        } else if (clickCount == 2) {
+          action = ACTION_DOUBLE;
+          Serial.println("[BTN] ACTION_DOUBLE");
+        } else if (clickCount == 3) {
+          action = ACTION_TRIPLE;
+          Serial.println("[BTN] ACTION_TRIPLE");
+        }
+        clickCount = 0;
+        btnState = IDLE;
+        Serial.println("[BTN] RELEASING → IDLE");
+      }
+      break;
   }
 
-  if (currentState == activeButtonState && (millis() - pressTime > longPressTime)) {
-    if (clickCount > 0) {
-      Serial.println("ACTION_LONG");
-      action = ACTION_LONG;
-      clickCount = 0;
-    }
-  }
-
-  if (clickCount > 0 && currentState != activeButtonState && (millis() - lastClickTime > multiClickWindow)) {
-    if (clickCount == 1) {
-      Serial.println("ACTION_SINGLE");
-      action = ACTION_SINGLE;
-    }
-    if (clickCount == 2) {
-      Serial.println("ACTION_DOUBLE");
-      action = ACTION_DOUBLE;
-    };
-    if (clickCount == 3) {
-      Serial.println("ACTION_TRIPLE");
-      action = ACTION_TRIPLE;
-    }
-    clickCount = 0;
-  }
-
-  lastState = reading;
   return action;
 }
+
+
+
 
 #endif  // BUTTON_MANAGER_H
