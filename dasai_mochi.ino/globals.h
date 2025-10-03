@@ -29,7 +29,8 @@ enum Mode {
   SCROLL_TEXT_SETTINGS_MODE,
   SCROLL_TEXT_MODE,
   SLIDESHOW_MODE,
-  WIFI_UPLOAD_MODE
+  WIFI_UPLOAD_MODE,
+  DYNAMIC_VIDEO_MODE
 };
 
 struct ScrollTextSettings {
@@ -60,7 +61,7 @@ struct AppSettings {
 
 // --- Số lượng mục ---
 const int NUM_SETTING_ITEMS_CONST = 13;
-const int NUM_MODE_ITEMS_CONST = 9;
+const int NUM_MODE_ITEMS_CONST = 10;
 const int NUM_SCROLL_TEXT_SETTINGS_ITEMS_CONST = 4;
 
 // --- Tiếng Việt ---
@@ -72,7 +73,7 @@ const char* const setting_items_vi[NUM_SETTING_ITEMS_CONST] PROGMEM = {
 };
 const char* const mode_items_vi[NUM_MODE_ITEMS_CONST] PROGMEM = {
   "Chơi Flappy", "Chơi Đua Xe", "Đồng hồ số", "Đồng hồ kim",
-  "Thời tiết", "Chữ chạy", "Nghe nhạc", "Trình chiếu ảnh", "Thoát"
+  "Thời tiết", "Chữ chạy", "Nghe nhạc", "Trình chiếu ảnh", "Video Động", "Thoát"
 };
 const char* const scroll_text_settings_items_vi[NUM_SCROLL_TEXT_SETTINGS_ITEMS_CONST] PROGMEM = {
   "Màu Sắc", "Tốc Độ", "Xem", "Lưu & Thoát"
@@ -87,7 +88,7 @@ const char* const setting_items_en[NUM_SETTING_ITEMS_CONST] PROGMEM = {
 };
 const char* const mode_items_en[NUM_MODE_ITEMS_CONST] PROGMEM = {
   "Play Flappy", "Play Car Game", "Watch (Digital)", "Watch (Analog)",
-  "Weather", "Scroll Text", "Play Music", "Slideshow", "Exit"
+  "Weather", "Scroll Text", "Play Music", "Slideshow", "Dynamic Video", "Exit"
 };
 const char* const scroll_text_settings_items_en[NUM_SCROLL_TEXT_SETTINGS_ITEMS_CONST] PROGMEM = {
   "Color", "Speed", "View", "Save & Exit"

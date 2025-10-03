@@ -39,6 +39,7 @@
 
 #define CONFIG_FILE "/config.json"
 #define SD_CS_PIN 7
+#define DYNAMIC_VIDEO_FILE "/ss_video_custom.bin"
 
 // --- CÁC BIẾN TOÀN CỤC ---
 TFT_eSPI tft = TFT_eSPI();
@@ -88,6 +89,29 @@ const uint8_t NUM_FLASH_VIDEOS = sizeof(flashVideoList) / sizeof(flashVideoList[
 uint8_t currentVideoIndex = 0;
 uint16_t currentFrame = 0;
 
+// Cấu trúc cho video từ file .bin
+struct FrameInfo {
+  uint32_t offset;
+  uint32_t size;
+};
+
+struct DynamicVideo {
+  File file;
+  uint32_t num_frames = 0;
+  FrameInfo *index_table = nullptr;
+  bool is_loaded = false;
+};
+
+struct JpegInput {
+  File *file;
+  uint32_t start_pos;
+  uint32_t current_pos;
+  uint32_t size;
+};
+
+// Biến toàn cục cho video động
+DynamicVideo dynamicVideo;
+
 VideoInfo analogFaces = { analog_face_frames, analog_face_frames_size, analog_face_num_frames };
 
 // --- MUSIC VARS ---
@@ -128,6 +152,9 @@ void populateMenuText(JsonDocument &doc);
 void drawSlideshowScreen();
 void reloadImageList();
 void drawWifiUploadScreen();
+bool loadDynamicVideo(const char *path);
+void closeDynamicVideo();
+void drawDynamicVideoFrame(uint16_t frame_index);
 // =======================================================================================
 // --- CÁC HÀM TIỆN ÍCH VÀ CALLBACK CHO VIỆC VẼ ---
 // =======================================================================================
@@ -187,6 +214,7 @@ void drawSlideshowScreen() {
     return;
   }
 
+  // Chỉ vẽ lại khi đến lúc chuyển slide
   if (millis() - lastSlideTime > 5000) {
     lastSlideTime = millis();
 
@@ -194,11 +222,24 @@ void drawSlideshowScreen() {
 
     File imageFile = SPIFFS.open(imagePath, "r");
     if (imageFile) {
-      // Dùng hàm drawFsJpg để vẽ từ một đối tượng File
+      // 1. Hướng đầu ra của bộ giải mã vào sprite
+      jpegSpriteTarget = &screenSprite;
+      TJpgDec.setCallback(sprite_output);
+
+      // 2. Giải mã hình ảnh vào bộ đệm sprite (ẩn)
       TJpgDec.drawFsJpg(0, 0, imageFile);
       imageFile.close();
+
+      // 3. Đẩy toàn bộ sprite đã hoàn chỉnh ra màn hình cùng một lúc
+      screenSprite.pushSprite(0, 0);
+
+      // 4. Quan trọng: Trả lại callback về mặc định
+      TJpgDec.setCallback(tft_output);
     } else {
       Serial.println("Failed to open image: " + imagePath);
+      screenSprite.fillSprite(TFT_BLACK);
+      myfont.print(10, 110, "Loi mo anh", TFT_RED, TFT_BLACK);
+      screenSprite.pushSprite(0, 0);
     }
 
     currentImageIndex = (currentImageIndex + 1) % imageFiles.size();
@@ -351,10 +392,15 @@ String getWeatherLabel(int iconIndex) {
 void drawDigitalWatchFace() {
   drawMatrixRainBackground(&tft, &screenSprite);
 
+  // Đảm bảo font mặc định của myfont được thiết lập
+  fontTargetSprite = &screenSprite;
+  myfont.set_font(Fira_Code_16);
+
   if (!chronos_is_time_synced()) {
     String msg = "Đang Kết Nối...";
     myfont.print((tft.width() - myfont.getLength(msg)) / 2, tft.height() / 2, msg, TFT_YELLOW, TFT_BLACK);
   } else {
+    // Thiết lập font Digitall0132pt7b cho thời gian
     screenSprite.setFreeFont(&Digitall0132pt7b);
     char timeStr[9];
     sprintf(timeStr, "%02d:%02d:%02d", chronos_get_hour(), chronos_get_minute(), chronos_get_second());
@@ -363,8 +409,12 @@ void drawDigitalWatchFace() {
     int y_pos = (tft.height() - 50) / 2;
     screenSprite.setTextColor(TFT_CYAN, TFT_BLACK);
     screenSprite.drawString(timeStr, x_pos, y_pos);
+    // Trả về font mặc định sau khi sử dụng Digitall0132pt7b
     screenSprite.setFreeFont(NULL);
 
+    // Sử dụng myfont cho ngày tháng
+    fontTargetSprite = &screenSprite;
+    myfont.set_font(Fira_Code_16);  // Đảm bảo myfont là Fira_Code_16
     char dateStr[11];
     sprintf(dateStr, "%02d/%02d/%d", chronos_get_day(), chronos_get_month(), chronos_get_year());
     myfont.print((tft.width() - myfont.getLength(dateStr)) / 2, y_pos + 50 + 10, dateStr, TFT_WHITE, TFT_BLACK);
@@ -380,6 +430,10 @@ void drawAnalogWatchFace() {
     screenSprite.pushSprite(0, 0);
     return;
   }
+
+  // Đảm bảo font mặc định của myfont được thiết lập
+  fontTargetSprite = &screenSprite;
+  myfont.set_font(Fira_Code_16);
 
   // 1. Thiết lập để TJpgDec vẽ vào sprite của chúng ta
   jpegSpriteTarget = &screenSprite;
@@ -429,138 +483,127 @@ void drawWeatherScreen() {
     return;
   }
 
+  // *** FIX: Khôi phục lại trạng thái font của sprite ***
+  screenSprite.setTextSize(1);
+  screenSprite.setTextDatum(TL_DATUM);
+  screenSprite.setFreeFont(nullptr);
+  fontTargetSprite = &screenSprite;  // Đảm bảo myfont cũng vẽ đúng chỗ
+  // *** END FIX ***
+
   screenSprite.fillSprite(TFT_BLACK);
 
   VideoInfo *backgroundVideo = &video01;
-  // Thiết lập để TJpgDec vẽ vào sprite màn hình
   jpegSpriteTarget = &screenSprite;
   TJpgDec.setCallback(sprite_output);
-
   TJpgDec.setJpgScale(4);
 
   const uint8_t *jpg_data = (const uint8_t *)pgm_read_ptr(&backgroundVideo->frames[currentBgFrame]);
   uint16_t jpg_size = pgm_read_word(&backgroundVideo->frames_size[currentBgFrame]);
 
-  int video_w = 240 / 4;  // 240 là chiều rộng màn hình, 4 là tỉ lệ scale
-  int video_h = 240 / 4;  // 240 là chiều cao màn hình, 4 là tỉ lệ scale
+  int video_w = 240 / 4;
+  int video_h = 240 / 4;
   int x_img = tft.width() - video_w;
   int y_img = tft.height() - video_h;
 
   TJpgDec.drawJpg(x_img, y_img, jpg_data, jpg_size);
 
   TJpgDec.setJpgScale(1);
+  TJpgDec.setCallback(tft_output);  // Khôi phục callback mặc định
 
-  // Cập nhật chỉ số khung hình cho lần vẽ tiếp theo
-  currentBgFrame++;
-  if (currentBgFrame >= backgroundVideo->num_frames) {
-    currentBgFrame = 0;  // Lặp lại video
-  }
+  currentBgFrame = (currentBgFrame + 1) % backgroundVideo->num_frames;
 
   WeatherData weather = chronos_get_weather();
   int iconIndex = weather.icon;
 
-
-  // --- GIAI ĐOẠN 3: VẼ HIỆU ỨNG NỀN ĐỘNG ---
-  // if (iconIndex == 3 || iconIndex == 4) {  // Mưa hoặc Dông
-  //   drawRainEffect(&tft, &screenSprite);
-  // } else {
-  //   screenSprite.fillSprite(TFT_BLACK);
-  // }
-
-
   int regionW = tft.width() / 3;
   int offsetX = tft.width() * 2 / 3;
-
-  int hWidth = tft.width() / 2;
 
   String city = weather.city;
   int lastSpace = city.lastIndexOf(' ');
   if (lastSpace > 0) {
     city = city.substring(0, lastSpace);
   }
-  // --- GIAI ĐOẠN 2: VẼ GIAO DIỆN CHÍNH ---
   myfont.print((160 - myfont.getLength(city)) / 2, 20, city, TFT_WHITE, TFT_BLACK);
 
-  // Vẽ icon thời tiết
   drawWeatherIcon(iconIndex, offsetX + (regionW - WEATHER_W) / 2, 0);
 
-  // // // Vẽ nhãn thời tiết
-  // String label = getWeatherLabel(iconIndex);
-  // myfont.print((tft.width() / 2 - myfont.getLength(label)) / 2, tft.height() / 2 + 20, label, TFT_CYAN, TFT_BLACK);
   screenSprite.setFreeFont(&Digitall0132pt7b);
 
-  // screenSprite.setTextSize(3);
   char hourStr[3];
   char minuteStr[3];
-
   sprintf(hourStr, "%02d", chronos_get_hour());
   sprintf(minuteStr, "%02d", chronos_get_minute());
 
   int hourW = screenSprite.textWidth(hourStr);
   int minuteW = screenSprite.textWidth(minuteStr);
   int totalW = hourW + minuteW;
-
   int timeX = 0 + (offsetX - totalW) / 2;
-
 
   screenSprite.setTextColor(0xFEE0);
   screenSprite.drawString(hourStr, timeX, 55);
-
-
   screenSprite.setTextColor(0xF206);
   screenSprite.drawString(minuteStr, timeX + hourW + 5, 55);
 
-  // screenSprite.setTextSize(2);
   screenSprite.setFreeFont(&Digitall0124pt7b);
   char secondStr[3];
   sprintf(secondStr, "%02d", chronos_get_second());
   screenSprite.setTextColor(0x24BE);
   screenSprite.drawString(secondStr, offsetX + (regionW - screenSprite.textWidth(secondStr)) / 2, 95);
+  screenSprite.setFreeFont(nullptr);
 
-  screenSprite.setFreeFont();
-
-  // screenSprite.setTextFont(4); // Lỗi, nên dùng myfont.print
+  screenSprite.setTextFont(4);
   char dateStr[11];
   sprintf(dateStr, "%02d/%02d/%d", chronos_get_day(), chronos_get_month(), chronos_get_year());
-  myfont.print((160 - myfont.getLength(dateStr)) / 2, 120, dateStr, TFT_WHITE, TFT_BLACK);
+  screenSprite.setTextColor(0xFFFF);
+  screenSprite.drawString(dateStr, (160 - screenSprite.textWidth(dateStr)) / 2, 120);
+  screenSprite.setTextFont(1);
+  // screenSprite.setTextSize(1);
+  // screenSprite.setTextDatum(TL_DATUM);
+  // screenSprite.setFreeFont(nullptr);
 
-
-  // Vẽ nhãn thời tiết
   String label = getWeatherLabel(iconIndex);
   int textW = myfont.getLength(label);
   int textX = offsetX + (regionW - textW) / 2;
   int textY = 66;
   screenSprite.fillRoundRect(166, textY, 72, 24, 2, TFT_WHITE);
   if (textW <= 72) {
-    myfont.print(textX, textY + 2, label, TFT_BLACK, TFT_WHITE);
+    myfont.print(textX, textY + 2, label, 0x8410, TFT_WHITE);
   } else {
-    drawMarqueeText(&screenSprite, &myfont, label, 167, textY + 2, 72, TFT_BLACK, TFT_WHITE, true, settings.marqueeSpeed);
+    drawMarqueeText(&screenSprite, &myfont, label, 167, textY + 2, 72, 0x8410, TFT_WHITE, true, settings.marqueeSpeed);
   }
 
-
-  // Nhiệt độ hiện tại
-  String tempStr = String(weather.currentTemp) + "°C";
-
   screenSprite.setFreeFont(&Digitall0132pt7b);
-  int textWidth = screenSprite.textWidth(tempStr);
+  String tempStr = String(weather.currentTemp);
+  int tempW = screenSprite.textWidth(tempStr);
+  int cW = screenSprite.textWidth("C");
+  int totalTempW = tempW + cW;
+  int tempX = 0 + (offsetX - totalTempW) / 2;
+  Serial.printf("tempW: ");
+  Serial.println(tempW);
+  Serial.printf("tempX: ");
+  Serial.println(tempX);
+  // Add degree symbol manually
+  // screenSprite.setTextDatum(MC_DATUM);
   screenSprite.setTextColor(int(weather.currentTemp) > 29 ? TFT_ORANGE : TFT_GREEN, TFT_BLACK);
-  screenSprite.drawString(tempStr, (160 - textWidth) / 2, 145);
+  screenSprite.drawString(tempStr, tempX - 5, 145);
+  screenSprite.setTextColor(int(weather.currentTemp) > 29 ? TFT_ORANGE : TFT_GREEN, TFT_BLACK);
+  screenSprite.drawString("C", tempX + tempW + 5, 145);
+  screenSprite.drawCircle((160 / 2) + screenSprite.textWidth(tempStr) / 2, 155, 4, int(weather.currentTemp) > 29 ? TFT_ORANGE : TFT_GREEN);
+  screenSprite.setTextDatum(TL_DATUM);  // Reset datum
   screenSprite.setFreeFont(NULL);
 
-  // // Nhiệt độ cao/thấp
   String highLowStr = "H:" + String(weather.highTemp) + "°C L:" + String(weather.lowTemp) + "°C";
-  // myfont.print((tft.width() - myfont.getLength(highLowStr)) / 2, 170, highLowStr, TFT_WHITE, TFT_BLACK);
-
-  // // Thông tin khác
-  String infoStr = "UV: " + String(weather.uv);
-  // myfont.print((tft.width() - myfont.getLength(infoStr)) / 2, 200, infoStr, TFT_WHITE, TFT_BLACK);
+  String infoStr = "UV:" + String(weather.uv);
   String other = highLowStr + " " + infoStr;
-  // screenSprite.fillRoundRect(4, 218, 152, 30, 2, TFT_WHITE);
   int otherW = myfont.getLength(other);
+  
+  Serial.printf("otherW: ");
+  Serial.println(otherW);
+
   if (otherW <= 150) {
     myfont.print(6, 220, other, TFT_WHITE, TFT_BLACK);
   } else {
-    drawMarqueeText(&screenSprite, &myfont, other, 6, 220, 150, TFT_WHITE, TFT_BLACK, true, settings.marqueeSpeed);
+    drawMarqueeText(&screenSprite, &myfont, other, 6, 220, 145, TFT_WHITE, TFT_BLACK, true, settings.marqueeSpeed);
   }
 
   screenSprite.pushSprite(0, 0);
@@ -790,6 +833,9 @@ void setup() {
 
     audio_set_volume(settings.volume);
     audio_set_autoplay(settings.musicAutoPlayNext);
+    loadAudioTracklist();
+
+    loadDynamicVideo(DYNAMIC_VIDEO_FILE);
 
     hourHandSprite.createSprite(HOUR_HAND_WIDTH, HOUR_HAND_HEIGHT);
     hourHandSprite.setPivot(HOUR_PIVOT_X, HOUR_PIVOT_Y);
@@ -924,7 +970,7 @@ void loop() {
         if (currentVideoIndex >= NUM_FLASH_VIDEOS)
           currentVideoIndex = 0;
         VideoInfo *currentVideo = flashVideoList[currentVideoIndex];
-        TJpgDec.setCallback(tft_output);
+        // TJpgDec.setCallback(tft_output);
         const uint8_t *jpg_data = (const uint8_t *)pgm_read_ptr(&currentVideo->frames[currentFrame]);
         uint16_t jpg_size = pgm_read_word(&currentVideo->frames_size[currentFrame]);
         TJpgDec.drawJpg(0, 0, jpg_data, jpg_size);
@@ -966,6 +1012,10 @@ void loop() {
           currentMode = newMode;
           if (currentMode == SLIDESHOW_MODE) {
             reloadImageList();
+          }
+          if (currentMode == DYNAMIC_VIDEO_MODE) {
+            currentFrame = 0;  // Reset về frame đầu tiên
+            loadDynamicVideo(DYNAMIC_VIDEO_FILE);
           }
           if (currentMode == SCROLL_TEXT_SETTINGS_MODE) {
             initScrollTextSettings();
@@ -1154,6 +1204,33 @@ void loop() {
           break;
         }
         drawSlideshowScreen();
+        break;
+      }
+    case DYNAMIC_VIDEO_MODE:
+      {
+        if (action == ACTION_LONG) {
+          closeDynamicVideo();
+          currentMode = MENU;
+          menu_enter(false);
+          break;
+        }
+
+        if (!dynamicVideo.is_loaded) {
+          screenSprite.fillSprite(TFT_BLACK);
+          myfont.print(10, 110, "Loi video .bin", TFT_RED, TFT_BLACK);
+          screenSprite.pushSprite(0, 0);
+          delay(1000);  // Show error for a second
+          currentMode = MENU;
+          menu_enter(false);
+          break;
+        }
+
+        drawDynamicVideoFrame(currentFrame);
+        delay(settings.frameDelay);
+        currentFrame++;
+        if (currentFrame >= dynamicVideo.num_frames) {
+          currentFrame = 0;
+        }
         break;
       }
   }
@@ -1349,4 +1426,77 @@ void loadUiStrings() {
       scrollTextSettingsItems[i] = FPSTR(pgm_read_ptr(&items_pgm[i]));
     }
   }
+}
+
+// --- CÁC HÀM XỬ LÝ VIDEO ĐỘNG TỪ FILE .BIN ---
+// =======================================================================================
+// --- DYNAMIC VIDEO FUNCTIONS (STREAMING VERSION) ---
+// =======================================================================================
+void closeDynamicVideo() {
+  if (dynamicVideo.is_loaded) {
+    if (dynamicVideo.index_table != nullptr) {
+      delete[] dynamicVideo.index_table;
+      dynamicVideo.index_table = nullptr;
+    }
+    dynamicVideo.is_loaded = false;
+    dynamicVideo.num_frames = 0;
+    Serial.println("Dynamic video resources released.");
+  }
+}
+
+bool loadDynamicVideo(const char *path) {
+  closeDynamicVideo();
+  Serial.printf("Loading dynamic video index from SPIFFS: %s\n", path);
+  File videoFile = SPIFFS.open(path, "r");
+  if (!videoFile) {
+    Serial.println("Failed to open dynamic video file for indexing.");
+    return false;
+  }
+  videoFile.read((uint8_t *)&dynamicVideo.num_frames, sizeof(uint32_t));
+  if (dynamicVideo.num_frames == 0) {
+    Serial.println("Video file is empty or header is invalid.");
+    videoFile.close();
+    return false;
+  }
+  Serial.printf("Video has %d frames.\n", dynamicVideo.num_frames);
+  dynamicVideo.index_table = new (std::nothrow) FrameInfo[dynamicVideo.num_frames];
+  if (dynamicVideo.index_table == nullptr) {
+    Serial.println("Failed to allocate memory for index table.");
+    videoFile.close();
+    return false;
+  }
+  size_t table_size = dynamicVideo.num_frames * sizeof(FrameInfo);
+  videoFile.read((uint8_t *)dynamicVideo.index_table, table_size);
+  videoFile.close();  // Đóng file ngay sau khi đọc xong index
+  dynamicVideo.is_loaded = true;
+  Serial.println("Dynamic video index loaded successfully.");
+  return true;
+}
+
+void drawDynamicVideoFrame(uint16_t frame_index) {
+  if (!dynamicVideo.is_loaded || frame_index >= dynamicVideo.num_frames) return;
+
+  File frameFile = SPIFFS.open(DYNAMIC_VIDEO_FILE, "r");
+  if (!frameFile) {
+    Serial.println("Failed to re-open dynamic video file for frame.");
+    return;
+  }
+
+  FrameInfo info = dynamicVideo.index_table[frame_index];
+  frameFile.seek(info.offset);
+
+  // 1. Hướng đầu ra của bộ giải mã vào sprite
+  jpegSpriteTarget = &screenSprite;
+  TJpgDec.setCallback(sprite_output);
+
+  // 2. Giải mã hình ảnh vào bộ đệm sprite (ẩn)
+  TJpgDec.drawFsJpg(0, 0, frameFile);
+
+  // 3. Đẩy toàn bộ sprite đã hoàn chỉnh ra màn hình cùng một lúc
+  screenSprite.pushSprite(0, 0);
+
+  // 4. Quan trọng: Trả lại callback về mặc định để không ảnh hưởng các chức năng khác
+  TJpgDec.setCallback(tft_output);
+
+  frameFile.close();
 }

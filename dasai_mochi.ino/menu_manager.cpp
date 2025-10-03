@@ -328,7 +328,8 @@ Mode menu_handle_action(ButtonAction action) {
           case 5: return SCROLL_TEXT_SETTINGS_MODE;
           case 6: return MUSIC_LIST_MODE;
           case 7: return SLIDESHOW_MODE;
-          case 8: return PLAYING;
+          case 8: return DYNAMIC_VIDEO_MODE;
+          case 9: return PLAYING;
         }
       }
     }

@@ -25,6 +25,7 @@ extern TFT_eSprite* fontTargetSprite;
  */
 void drawMarqueeText(TFT_eSprite* sprite, MakeFont* font, String text, int16_t x, int16_t y, int16_t width, uint16_t textColor, uint16_t bgColor, bool isSelected, uint32_t speed_ms);
 
+void drawMarqueeText(TFT_eSprite* sprite, String text, int16_t x, int16_t y, int16_t width, uint16_t textColor, uint16_t bgColor, bool isSelected, uint32_t speed_ms);
 
 String extractTimeSafe(const String& text);
 
