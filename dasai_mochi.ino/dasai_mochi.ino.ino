@@ -89,6 +89,8 @@ const uint8_t NUM_FLASH_VIDEOS = sizeof(flashVideoList) / sizeof(flashVideoList[
 uint8_t currentVideoIndex = 0;
 uint16_t currentFrame = 0;
 
+uint16_t currentBgFrame = 0;
+
 // Cấu trúc cho video từ file .bin
 struct FrameInfo {
   uint32_t offset;
@@ -474,8 +476,6 @@ int centerTextInRegion(String text, int offsetX, int regionW) {
 
 // *** HÀM MỚI ĐỂ VẼ MÀN HÌNH THỜI TIẾT ***
 void drawWeatherScreen() {
-  static uint16_t currentBgFrame = 0;
-
   if (!chronos_has_weather_data()) {
     screenSprite.fillSprite(TFT_BLACK);
     myfont.print(10, 110, "Chưa Đồng Bộ", TFT_YELLOW, TFT_BLACK);
@@ -492,7 +492,7 @@ void drawWeatherScreen() {
 
   screenSprite.fillSprite(TFT_BLACK);
 
-  VideoInfo *backgroundVideo = &video01;
+  VideoInfo *backgroundVideo = flashVideoList[settings.currentWeatherIndex];
   jpegSpriteTarget = &screenSprite;
   TJpgDec.setCallback(sprite_output);
   TJpgDec.setJpgScale(4);
@@ -523,7 +523,11 @@ void drawWeatherScreen() {
   if (lastSpace > 0) {
     city = city.substring(0, lastSpace);
   }
-  myfont.print((160 - myfont.getLength(city)) / 2, 20, city, TFT_WHITE, TFT_BLACK);
+
+  screenSprite.setTextFont(4);
+  screenSprite.setTextColor(0xFFFF);
+  screenSprite.drawString(city, (160 - screenSprite.textWidth(city)) / 2, 20);
+  screenSprite.setTextFont(1);
 
   drawWeatherIcon(iconIndex, offsetX + (regionW - WEATHER_W) / 2, 0);
 
@@ -565,7 +569,7 @@ void drawWeatherScreen() {
   int textW = myfont.getLength(label);
   int textX = offsetX + (regionW - textW) / 2;
   int textY = 66;
-  screenSprite.fillRoundRect(166, textY, 72, 24, 2, TFT_WHITE);
+  screenSprite.fillRoundRect(166, textY, 72, 26, 2, TFT_WHITE);
   if (textW <= 72) {
     myfont.print(textX, textY + 2, label, 0x8410, TFT_WHITE);
   } else {
@@ -578,17 +582,13 @@ void drawWeatherScreen() {
   int cW = screenSprite.textWidth("C");
   int totalTempW = tempW + cW;
   int tempX = 0 + (offsetX - totalTempW) / 2;
-  Serial.printf("tempW: ");
-  Serial.println(tempW);
-  Serial.printf("tempX: ");
-  Serial.println(tempX);
   // Add degree symbol manually
   // screenSprite.setTextDatum(MC_DATUM);
   screenSprite.setTextColor(int(weather.currentTemp) > 29 ? TFT_ORANGE : TFT_GREEN, TFT_BLACK);
   screenSprite.drawString(tempStr, tempX - 5, 145);
   screenSprite.setTextColor(int(weather.currentTemp) > 29 ? TFT_ORANGE : TFT_GREEN, TFT_BLACK);
   screenSprite.drawString("C", tempX + tempW + 5, 145);
-  screenSprite.drawCircle((160 / 2) + screenSprite.textWidth(tempStr) / 2, 155, 4, int(weather.currentTemp) > 29 ? TFT_ORANGE : TFT_GREEN);
+  screenSprite.drawCircle(tempX + tempW, 155, 4, int(weather.currentTemp) > 29 ? TFT_ORANGE : TFT_GREEN);
   screenSprite.setTextDatum(TL_DATUM);  // Reset datum
   screenSprite.setFreeFont(NULL);
 
@@ -596,7 +596,7 @@ void drawWeatherScreen() {
   String infoStr = "UV:" + String(weather.uv);
   String other = highLowStr + " " + infoStr;
   int otherW = myfont.getLength(other);
-  
+
   Serial.printf("otherW: ");
   Serial.println(otherW);
 
@@ -1110,7 +1110,13 @@ void loop() {
       }
     case WEATHER_MODE:
       {
-        if (action == ACTION_LONG) {
+        if (action == ACTION_DOUBLE) {
+          if (NUM_FLASH_VIDEOS > 0) {
+            settings.currentWeatherIndex = (settings.currentWeatherIndex + 1) % NUM_FLASH_VIDEOS;
+            saveSettings();
+            currentBgFrame = 0;
+          }
+        } else if (action == ACTION_LONG) {
           currentMode = MENU;
           menu_enter();
           break;
@@ -1284,6 +1290,7 @@ void saveSettings() {
   doc["notificationTimeout"] = settings.notificationTimeout;
   doc["marqueeSpeed"] = settings.marqueeSpeed;
   doc["currentAnalogFaceIndex"] = settings.currentAnalogFaceIndex;
+  doc["currentWeatherIndex"] = settings.currentWeatherIndex;
   doc["soundEnabled"] = settings.soundEnabled;
   doc["volume"] = settings.volume;
   doc["musicAutoPlayNext"] = settings.musicAutoPlayNext;
@@ -1327,6 +1334,7 @@ void loadSettings() {
       settings.notificationTimeout = doc["notificationTimeout"] | 5;
       settings.marqueeSpeed = doc["marqueeSpeed"] | 35;
       settings.currentAnalogFaceIndex = doc["currentAnalogFaceIndex"] | 0;
+      settings.currentWeatherIndex = doc["currentWeatherIndex"] | 0;
       settings.soundEnabled = doc["soundEnabled"] | false;
       settings.volume = doc["volume"] | 10;
       settings.musicAutoPlayNext = doc["musicAutoPlayNext"] | true;
@@ -1353,6 +1361,7 @@ void loadSettings() {
     settings.notificationTimeout = 5;
     settings.marqueeSpeed = 35;
     settings.currentAnalogFaceIndex = 0;
+    settings.currentWeatherIndex = 0;
     settings.soundEnabled = false;
     settings.volume = 15;
     settings.musicAutoPlayNext = true;

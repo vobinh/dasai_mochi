@@ -46,6 +46,7 @@ struct AppSettings {
   int notificationTimeout;
   int marqueeSpeed;
   int currentAnalogFaceIndex;
+  int currentWeatherIndex;
   bool soundEnabled;  // *** BIẾN MỚI: Bật/tắt âm thanh ***
   int volume;         // *** BIẾN MỚI: Mức âm lượng (0-30) ***
   bool musicAutoPlayNext;
