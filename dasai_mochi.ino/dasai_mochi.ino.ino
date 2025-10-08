@@ -39,7 +39,7 @@
 
 #define CONFIG_FILE "/config.json"
 #define SD_CS_PIN 7
-#define DYNAMIC_VIDEO_FILE "/ss_video_custom.bin"
+#define DYNAMIC_VIDEO_FILE "/video_custom.bin"
 
 // --- CÁC BIẾN TOÀN CỤC ---
 TFT_eSPI tft = TFT_eSPI();
@@ -192,17 +192,17 @@ void reloadImageList() {
 
 void drawWifiUploadScreen() {
   screenSprite.fillSprite(TFT_BLACK);
-  myfont.print((tft.width() - myfont.getLength("Che Do WiFi Upload")) / 2, 20, "Che Do WiFi Upload", TFT_CYAN, TFT_BLACK);
+  myfont.print((tft.width() - myfont.getLength("WiFi Upload")) / 2, 20, "WiFi Upload", TFT_CYAN, TFT_BLACK);
 
-  myfont.print(20, 60, "Mo WiFi & Ket Noi:", TFT_WHITE, TFT_BLACK);
-  myfont.print(30, 85, "SSID: Mochi-Watch-Config", TFT_YELLOW, TFT_BLACK);
+  myfont.print(20, 60, "Turn on WiFi & Connect:", TFT_WHITE, TFT_BLACK);
+  myfont.print(30, 85, "SSID: Mochi-Watch", TFT_YELLOW, TFT_BLACK);
   myfont.print(30, 110, "Pass: 12345678", TFT_YELLOW, TFT_BLACK);
 
-  myfont.print(20, 145, "Mo Trinh Duyet & Truy Cap:", TFT_WHITE, TFT_BLACK);
+  myfont.print(20, 145, "Open Browser & Access:", TFT_WHITE, TFT_BLACK);
   String ip = wifi_manager_get_ip();
   myfont.print(30, 170, ip, TFT_YELLOW, TFT_BLACK);
 
-  String exitMsg = "Nhan giu de thoat";
+  String exitMsg = "Press & hold - Exit";
   myfont.print((tft.width() - myfont.getLength(exitMsg)) / 2, 210, exitMsg, TFT_RED, TFT_BLACK);
 
   screenSprite.pushSprite(0, 0);
@@ -350,6 +350,7 @@ void drawMusicPlayerScreen() {
   } else {
     drawMarqueeText(&screenSprite, &myfont, trackName, 10, 80, availableWidth, TFT_CYAN, TFT_BLACK, true, settings.marqueeSpeed);
   }
+
 
   // 3. Vẽ icon Play/Pause
   if (audio_is_playing()) {
@@ -603,7 +604,7 @@ void drawWeatherScreen() {
   if (otherW <= 150) {
     myfont.print(6, 220, other, TFT_WHITE, TFT_BLACK);
   } else {
-    drawMarqueeText(&screenSprite, &myfont, other, 6, 220, 145, TFT_WHITE, TFT_BLACK, true, settings.marqueeSpeed);
+    drawMarqueeText(&screenSprite, &myfont, other, 6, 220, 150, TFT_WHITE, TFT_BLACK, true, settings.marqueeSpeed);
   }
 
   screenSprite.pushSprite(0, 0);
@@ -990,17 +991,21 @@ void loop() {
 
     case MENU:
       {
-        bool oldBluetoothSetting = settings.bluetoothEnabled;
-        bool oldWifiSetting = settings.wifiEnabled;
+
         Mode newMode = menu_handle_action(action);
         if (newMode != MENU) {
-          if (menu_manager_save_triggered()) {
-            saveSettings();
-            if (settings.wifiEnabled && !oldWifiSetting) {
-              Serial.println("WiFi enabled. Restarting into WiFi Only Mode...");
+          if (!menu_manager_save_triggered()) {
+            if (newMode == WIFI_UPLOAD_MODE) {
+              settings.wifiEnabled = true;
+              saveSettings();
+              Serial.println("Entering WiFi mode. Restarting...");
               delay(1000);
               ESP.restart();
             }
+            currentMode = newMode;
+          } else {
+            bool oldBluetoothSetting = settings.bluetoothEnabled;
+            saveSettings();
             if (oldBluetoothSetting != settings.bluetoothEnabled) {
               ESP.restart();
             }

@@ -25,7 +25,6 @@ static enum EditMode {
   EDIT_AUTOPLAY,
   EDIT_DISPLAY_SHAPE,
   EDIT_BLUETOOTH,
-  EDIT_WIFI
 } currentEditMode;
 
 static int selectedMenuItem = 0;
@@ -125,8 +124,7 @@ static void draw_setting_value(int itemIndex, int x, int y, int w, uint16_t text
     case 6: valueStr = String(temp_settings.volume); break;
     case 7: valueStr = temp_settings.musicAutoPlayNext ? "ON" : "OFF"; break;
     case 8: valueStr = temp_settings.bluetoothEnabled ? "ON" : "OFF"; break;
-    case 9: valueStr = temp_settings.wifiEnabled ? "ON" : "OFF"; break;
-    case 10: valueStr = (temp_settings.displayShape == SHAPE_SQUARE) ? "Vuông" : "Tròn"; break;
+    case 9: valueStr = (temp_settings.displayShape == SHAPE_SQUARE) ? "Vuông" : "Tròn"; break;
   }
 
   if (valueStr.length() > 0) {
@@ -263,7 +261,6 @@ Mode menu_handle_action(ButtonAction action) {
           break;
         case EDIT_AUTOPLAY: temp_settings.musicAutoPlayNext = !temp_settings.musicAutoPlayNext; break;
         case EDIT_BLUETOOTH: temp_settings.bluetoothEnabled = !temp_settings.bluetoothEnabled; break;
-        case EDIT_WIFI: temp_settings.wifiEnabled = !temp_settings.wifiEnabled; break;
         case EDIT_DISPLAY_SHAPE: temp_settings.displayShape = (temp_settings.displayShape == SHAPE_SQUARE) ? SHAPE_ROUND : SHAPE_SQUARE; break;
         default: break;
       }
@@ -308,13 +305,12 @@ Mode menu_handle_action(ButtonAction action) {
           case 6: currentEditMode = EDIT_VOLUME; break;
           case 7: currentEditMode = EDIT_AUTOPLAY; break;
           case 8: currentEditMode = EDIT_BLUETOOTH; break;
-          case 9: currentEditMode = EDIT_WIFI; break;
-          case 10: currentEditMode = EDIT_DISPLAY_SHAPE; break;
-          case 11:
+          case 9: currentEditMode = EDIT_DISPLAY_SHAPE; break;
+          case 10:
             memcpy(app_settings, &temp_settings, sizeof(AppSettings));
             save_was_triggered = true;
             return PLAYING;
-          case 12:
+          case 11:
             save_was_triggered = false;
             return PLAYING;
         }
@@ -329,7 +325,8 @@ Mode menu_handle_action(ButtonAction action) {
           case 6: return MUSIC_LIST_MODE;
           case 7: return SLIDESHOW_MODE;
           case 8: return DYNAMIC_VIDEO_MODE;
-          case 9: return PLAYING;
+          case 9: return WIFI_UPLOAD_MODE;
+          case 10: return PLAYING;
         }
       }
     }
