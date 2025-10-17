@@ -321,12 +321,13 @@ Mode menu_handle_action(ButtonAction action) {
           case 2: return WATCH_MODE;
           case 3: return ANALOG_WATCH_MODE;
           case 4: return WEATHER_MODE;
-          case 5: return SCROLL_TEXT_SETTINGS_MODE;
-          case 6: return MUSIC_LIST_MODE;
-          case 7: return SLIDESHOW_MODE;
-          case 8: return DYNAMIC_VIDEO_MODE;
-          case 9: return WIFI_UPLOAD_MODE;
-          case 10: return PLAYING;
+          case 5: return WEATHER_STATION_MODE;
+          case 6: return SCROLL_TEXT_MODE;
+          case 7: return MUSIC_LIST_MODE;
+          case 8: return SLIDESHOW_MODE;
+          case 9: return DYNAMIC_VIDEO_MODE;
+          case 10: return WIFI_UPLOAD_MODE;
+          case 11: return PLAYING;
         }
       }
     }

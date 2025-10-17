@@ -1,5 +1,7 @@
 #include "wifi_manager.h"
 #include "SPIFFS.h"
+#include "ArduinoJson.h"
+#include "globals.h" // Thêm dòng này để truy cập CONFIG_FILE và các định nghĩa khác
 
 // --- CONFIGURATION ---
 static const char* ssid     = "Mochi-Watch";
@@ -7,6 +9,7 @@ static const char* password = "12345678";   // ít nhất 8 ký tự
 
 static WebServer server(80);
 static File fsUploadFile;
+static AppSettings* _settings; // Con trỏ để truy cập cài đặt chung
 bool newBundleUploaded = false;
 
 // Forward declarations
@@ -14,6 +17,8 @@ static void handleListFiles();
 static void handleListAllFiles();
 static void handleDelete();
 static void handleDeleteAny();
+static void handleSettings();
+static void handleSaveSettings();
 
 // --- UTILS ---
 String formatBytes(size_t bytes) {
@@ -81,12 +86,15 @@ static void handleListFiles() {
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mochi Watch - File Manager</title>
 <style>
-:root{--bg:#0e1117;--surface:#181b22;--accent:#00c6a7;--danger:#f44336;--text:#e9e9e9;--muted:#888;}
+:root{--bg:#0e1117;--surface:#161b22;--accent:#00c6a7;--danger:#f44336;--text:#e9e9e9;--muted:#888;--border: #30363d;}
 body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);margin:0;padding:1rem;}
 .container{max-width:860px;margin:auto;}
 h1{text-align:center;color:var(--accent);margin-bottom:.5rem;}
 h2{color:var(--accent);margin-top:1.5rem;border-bottom:1px solid #333;padding-bottom:.25rem;}
-.card{background:var(--surface);border-radius:12px;padding:1rem;margin-top:1rem;box-shadow:0 2px 10px rgba(0,0,0,.4);}
+.card{background:var(--surface);border: 1px solid var(--border); border-radius:12px;padding:1rem;margin-top:1rem;box-shadow:0 2px 10px rgba(0,0,0,.4);}
+.tabs{display:flex;border-bottom:1px solid var(--border);margin-bottom:1rem;}
+.tab{padding:10px 20px;cursor:pointer;border-bottom:2px solid transparent;}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent);}
 .storage-bar{margin-top:.5rem;background:#222;border-radius:8px;height:18px;overflow:hidden;}
 .storage-fill{height:100%;background:var(--accent);width:)rawliteral" + String(percent) + "%;}";
 
@@ -108,10 +116,20 @@ h2{color:var(--accent);margin-top:1.5rem;border-bottom:1px solid #333;padding-bo
 .footer{text-align:center;color:#777;margin-top:2rem;font-size:.8rem;}
 .link{color:var(--accent);text-decoration:none;font-size:.9rem;}
 .link:hover{text-decoration:underline;}
+.form-group{margin-bottom:1rem;}
+.form-group label{display:block;margin-bottom:.5rem;color:var(--muted);}
+.form-group input{width:calc(100% - 20px);background:#0d1117;border:1px solid var(--border);color:var(--text);padding:10px;border-radius:6px;}
+.form-group input:focus{outline:none;border-color:var(--accent);}
+.btn-save{background:var(--accent);color:#000;border:none;padding:.8rem 1.5rem;border-radius:8px;font-weight:600;cursor:pointer;margin-top:1rem;width:100%;}
 </style></head><body>
 <div class='container'>
-<h1>📁 Mochi Watch File Manager</h1>
-<div class='card'>
+<h1>📁 Mochi Watch Manager</h1>
+<div class="tabs">
+  <div class="tab active" onclick="showTab('files')">Quản lý File</div>
+  <div class="tab" onclick="showTab('settings')">Cài đặt</div>
+</div>
+<div id="files-tab" class="tab-content">
+  <div class='card'>
   <h2>💾 Storage</h2>
   <div class='storage-bar'><div class='storage-fill' style='width:)rawliteral" + String(percent) + "%;'></div></div>";
     html += "<div class='storage-info'>" + formatBytes(usedBytes) + " / " + formatBytes(totalBytes) + " used</div></div>";
@@ -163,9 +181,53 @@ h2{color:var(--accent);margin-top:1.5rem;border-bottom:1px solid #333;padding-bo
         }
         file = root.openNextFile();
     }
+    // <div class="form-group">
+    //     <label for="language">Ngôn ngữ</label>
+    //     <select id="language" name="language">
+    //       <option value="vi" )rawliteral" + String((_settings->language == "vi") ? "selected" : "") + R"rawliteral(>Tiếng Việt</option>
+    //       <option value="en" )rawliteral" + String((_settings->language == "en") ? "selected" : "") + R"rawliteral(>English</option>
+    //     </select>
+    //   </div>
 
     if (!foundImages) html += "<p style='text-align:center;color:#888;'>Chưa có hình nào.</p>";
     html += "</div></div>";
+
+    // --- Settings Tab ---
+    html += R"rawliteral(
+</div>
+<div id="settings-tab" class="tab-content" style="display:none;">
+  <div class="card">
+    <h2>⚙️ Cài đặt Trạm thời tiết</h2>
+    <form action="/save_settings" method="POST">
+      <div class="form-group">
+        <label for="ssid">Tên WiFi (SSID)</label>
+        <input type="text" id="ssid" name="ssid" value=")rawliteral" + _settings->stationSsid + R"rawliteral(">
+      </div>
+      <div class="form-group">
+        <label for="pass">Mật khẩu WiFi</label>
+        <input type="password" id="pass" name="pass" value=")rawliteral" + _settings->stationPassword + R"rawliteral(">
+      </div>
+      <div class="form-group">
+        <label for="apikey">OpenWeatherMap API Key</label>
+        <input type="text" id="apikey" name="apikey" value=")rawliteral" + _settings->owmApiKey + R"rawliteral(">
+      </div>
+      <div class="form-group">
+        <label for="cityid">OpenWeatherMap City ID</label>
+        <input type="text" id="cityid" name="cityid" value=")rawliteral" + _settings->owmCityId + R"rawliteral(">
+      </div>
+      <div class="form-group">
+        <label for="lat">Latitude</label>
+        <input type="text" id="lat" name="lat" value=")rawliteral" + _settings->latitude + R"rawliteral(">
+      </div>
+      <div class="form-group">
+        <label for="lon">Longitude</label>
+        <input type="text" id="lon" name="lon" value=")rawliteral" +_settings->longitude + R"rawliteral(">
+      </div>
+      <button type="submit" class="btn-save">Lưu Cài Đặt</button>
+    </form>
+  </div>
+</div>
+)rawliteral";
 
     html += R"rawliteral(
 <div class="footer">
@@ -174,6 +236,15 @@ h2{color:var(--accent);margin-top:1.5rem;border-bottom:1px solid #333;padding-bo
 </div>
 </div>
 <script>
+function showTab(tabName) {
+  document.querySelectorAll('.tab-content').forEach(t => t.style.display = 'none');
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById(tabName + '-tab').style.display = 'block';
+  event.currentTarget.classList.add('active');
+}
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelector('.tab').click();
+});
 const form=document.getElementById('upload-form');
 const input=document.getElementById('file-input');
 const bar=document.getElementById('progress-bar');
@@ -260,10 +331,46 @@ static void handleDeleteAny() {
     } else server.send(400, "text/plain", "Invalid path");
 }
 
+static void handleSaveSettings() {
+    bool changed = false;
+    if (server.hasArg("ssid") && server.arg("ssid") != _settings->stationSsid) {
+        _settings->stationSsid = server.arg("ssid");
+        changed = true;
+    }
+    if (server.hasArg("pass") && server.arg("pass") != _settings->stationPassword) {
+        _settings->stationPassword = server.arg("pass");
+        changed = true;
+    }
+    if (server.hasArg("apikey") && server.arg("apikey") != _settings->owmApiKey) {
+        _settings->owmApiKey = server.arg("apikey");
+        changed = true;
+    }
+    if (server.hasArg("cityid") && server.arg("cityid") != _settings->owmCityId) {
+        _settings->owmCityId = server.arg("cityid");
+        changed = true;
+    }
+
+    if (server.hasArg("lat") && server.arg("lat") != _settings->latitude) {
+        _settings->latitude = server.arg("lat");
+        changed = true;
+    }
+    if (server.hasArg("lon") && server.arg("lon") != _settings->longitude) {
+        _settings->longitude = server.arg("lon");
+        changed = true;
+    }
+
+    if (changed) {
+        wifi_manager_save_settings(); // Gọi hàm lưu file config
+    }
+    server.sendHeader("Location", "/list", true);
+    server.send(302, "text/plain", "");
+}
+
 // =======================================================================================
 // --- WIFI MANAGER PUBLIC API ---
 // =======================================================================================
-void wifi_manager_init() {
+void wifi_manager_init(AppSettings* settings) {
+    _settings = settings;
     if (!SPIFFS.begin(true)) Serial.println("SPIFFS mount failed!");
 
     server.on("/", HTTP_GET, []() {
@@ -274,10 +381,11 @@ void wifi_manager_init() {
         server.sendHeader("Location", "/list", true);
         server.send(302, "text/plain", "");
     }, handleFileUpload);
-    server.on("/list", HTTP_GET, handleListFiles);
+    server.on("/list", HTTP_GET, handleListFiles); // Trang chính giờ là /list
     server.on("/delete", HTTP_GET, handleDelete);
     server.on("/all", HTTP_GET, handleListAllFiles);
     server.on("/delete_any", HTTP_GET, handleDeleteAny);
+    server.on("/save_settings", HTTP_POST, handleSaveSettings);
 
     // Serve static images
     server.onNotFound([]() {
@@ -307,3 +415,40 @@ void wifi_manager_disconnect() {
 
 void wifi_manager_loop() { server.handleClient(); }
 String wifi_manager_get_ip() { return WiFi.softAPIP().toString(); }
+
+// Hàm lưu cài đặt, được gọi từ dasai_mochi.ino.ino
+void wifi_manager_save_settings() {
+    Serial.println("Saving settings from WiFi Manager...");
+    File configFile = SPIFFS.open(CONFIG_FILE, "w");
+    if (!configFile) {
+        Serial.println("Failed to open config file for writing");
+        return;
+    }
+
+    StaticJsonDocument<2048> doc;
+    // Ghi lại tất cả các cài đặt hiện có
+    doc["frameDelay"] = _settings->frameDelay;
+    doc["currentRotation"] = _settings->currentRotation;
+    doc["language"] = _settings->currentLang;
+    doc["notificationTimeout"] = _settings->notificationTimeout;
+    doc["marqueeSpeed"] = _settings->marqueeSpeed;
+    doc["currentAnalogFaceIndex"] = _settings->currentAnalogFaceIndex;
+    doc["currentWeatherIndex"] = _settings->currentWeatherIndex;
+    doc["soundEnabled"] = _settings->soundEnabled;
+    doc["volume"] = _settings->volume;
+    doc["musicAutoPlayNext"] = _settings->musicAutoPlayNext;
+    doc["displayShape"] = (_settings->displayShape == SHAPE_SQUARE) ? "square" : "round";
+    doc["bluetoothEnabled"] = _settings->bluetoothEnabled;
+    doc["wifiEnabled"] = _settings->wifiEnabled;
+    doc["stationSsid"] = _settings->stationSsid;
+    doc["stationPassword"] = _settings->stationPassword;
+    doc["owmApiKey"] = _settings->owmApiKey;
+    doc["owmCityId"] = _settings->owmCityId;
+    doc["latitude"] = _settings->latitude;
+    doc["longitude"] = _settings->longitude;
+
+    if (serializeJson(doc, configFile) == 0) {
+        Serial.println(F("Failed to write to file"));
+    }
+    configFile.close();
+}

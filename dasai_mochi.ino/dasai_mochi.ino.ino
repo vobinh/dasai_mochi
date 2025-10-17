@@ -18,6 +18,7 @@
 #include "chronos_manager.h"
 #include "ui_effects.h"
 #include "wifi_manager.h"
+#include "weather_station.h"
 
 #include "flappy_game.h"
 #include "car_game.h"
@@ -36,10 +37,6 @@
 #define IDLE_VIDEO_INDEX 1              // Video sẽ nhảy đến sau 2 phút (video02)
 #define IDLE_TIMEOUT_VIDEO 30000        // 2 phút (tính bằng mili giây)
 #define IDLE_TIMEOUT_MODE_SWITCH 60000  // 5 phút (tính bằng mili giây)
-
-#define CONFIG_FILE "/config.json"
-#define SD_CS_PIN 7
-#define DYNAMIC_VIDEO_FILE "/video_custom.bin"
 
 // --- CÁC BIẾN TOÀN CỤC ---
 TFT_eSPI tft = TFT_eSPI();
@@ -83,8 +80,7 @@ typedef struct _VideoInfo {
 #include "video02.h"
 #include "video03.h"
 #include "video04.h"
-#include "video05.h"
-VideoInfo *flashVideoList[] = { &video01, &video02, &video03, &video04, &video05 };
+VideoInfo *flashVideoList[] = { &video01, &video02, &video03, &video04 };
 const uint8_t NUM_FLASH_VIDEOS = sizeof(flashVideoList) / sizeof(flashVideoList[0]);
 uint8_t currentVideoIndex = 0;
 uint16_t currentFrame = 0;
@@ -157,6 +153,7 @@ void drawWifiUploadScreen();
 bool loadDynamicVideo(const char *path);
 void closeDynamicVideo();
 void drawDynamicVideoFrame(uint16_t frame_index);
+void wifi_manager_save_settings(); // Forward declaration
 // =======================================================================================
 // --- CÁC HÀM TIỆN ÍCH VÀ CALLBACK CHO VIỆC VẼ ---
 // =======================================================================================
@@ -804,12 +801,20 @@ void setup() {
   if (settings.wifiEnabled) {
     Serial.println("*** WiFi Only Boot Mode Activated! ***");
     button_init();
-
-    wifi_manager_init();
+    
+    wifi_manager_init(&settings);
     wifi_manager_connect();
 
     currentMode = WIFI_UPLOAD_MODE;
     Serial.println("--- Booted directly into WiFi Upload Mode ---");
+  } else if (settings.weatherEnabled) {
+    Serial.println("*** Weather Boot Mode Activated! ***");
+    button_init();
+
+    weather_station_init(&tft, &screenSprite, &myfont, &settings);
+    weather_station_enter();
+    currentMode = WEATHER_STATION_MODE;
+    Serial.println("--- Booted directly into WEATHER STATION MODE ---");
   } else {
     Serial.println("--- Normal Boot Mode ---");
 
@@ -818,6 +823,7 @@ void setup() {
     loadUiStrings();
     chronos_init(&tft, &screenSprite, &myfont, &settings);
     audio_init();
+   
     audio_set_volume(0);
 
     TJpgDec.setJpgScale(1);
@@ -868,6 +874,21 @@ void loop() {
     if (action == ACTION_LONG) {
       // Tắt WiFi, lưu cài đặt và khởi động lại về chế độ bình thường
       settings.wifiEnabled = false;
+      saveSettings();
+      Serial.println("Exiting WiFi mode. Restarting into normal mode...");
+      delay(500);
+      ESP.restart();
+    }
+    return;  // Dừng vòng lặp tại đây
+  }
+
+  if (currentMode == WEATHER_STATION_MODE) {
+    // weather_station_enter();
+
+    ButtonAction action = getButtonAction();
+    Mode newMode = weather_station_loop(action);
+    if (newMode != WEATHER_STATION_MODE) {
+      settings.weatherEnabled = false;
       saveSettings();
       Serial.println("Exiting WiFi mode. Restarting into normal mode...");
       delay(500);
@@ -1002,6 +1023,14 @@ void loop() {
               delay(1000);
               ESP.restart();
             }
+
+            if (newMode == WEATHER_STATION_MODE) {
+              settings.weatherEnabled = true;
+              saveSettings();
+              Serial.println("Entering WiFi mode. Restarting...");
+              delay(1000);
+              ESP.restart();
+            }
             currentMode = newMode;
           } else {
             bool oldBluetoothSetting = settings.bluetoothEnabled;
@@ -1025,6 +1054,9 @@ void loop() {
           if (currentMode == SCROLL_TEXT_SETTINGS_MODE) {
             initScrollTextSettings();
           }
+          // if (currentMode == WEATHER_STATION_MODE) {
+          //   weather_station_enter();
+          // }
           tft.fillScreen(TFT_BLACK);
           if (currentMode == GAME_FLAPPY)
             Flappy::start();
@@ -1244,6 +1276,16 @@ void loop() {
         }
         break;
       }
+    // case WEATHER_STATION_MODE:
+    //   {
+    //     Mode newMode = weather_station_loop(action);
+    //     if (newMode != WEATHER_STATION_MODE) {
+    //       weather_station_exit();
+    //       currentMode = newMode;
+    //       menu_enter();
+    //     }
+    //     break;
+    //   }
   }
 }
 
@@ -1302,6 +1344,15 @@ void saveSettings() {
   doc["displayShape"] = (settings.displayShape == SHAPE_SQUARE) ? "square" : "round";
   doc["bluetoothEnabled"] = settings.bluetoothEnabled;
   doc["wifiEnabled"] = settings.wifiEnabled;
+  doc["weatherEnabled"] = settings.weatherEnabled;
+
+  // Lưu cài đặt Weather Station
+  doc["stationSsid"] = settings.stationSsid;
+  doc["stationPassword"] = settings.stationPassword;
+  doc["owmApiKey"] = settings.owmApiKey;
+  doc["owmCityId"] = settings.owmCityId;
+  doc["latitude"] = settings.latitude;
+  doc["longitude"] = settings.longitude;
 
   JsonObject scrollText = doc.createNestedObject("scrollText");
   scrollText["text"] = settings.scrollText.text;
@@ -1333,6 +1384,9 @@ void loadSettings() {
     StaticJsonDocument<2048> doc;
     DeserializationError error = deserializeJson(doc, configFile);
     if (!error) {
+
+      Serial.println("loadSettings");
+
       settings.frameDelay = doc["frameDelay"] | 20;
       settings.currentRotation = doc["currentRotation"] | 3;
       settings.currentLang = doc["language"] | "vi";
@@ -1345,6 +1399,7 @@ void loadSettings() {
       settings.musicAutoPlayNext = doc["musicAutoPlayNext"] | true;
       settings.bluetoothEnabled = doc["bluetoothEnabled"] | true;
       settings.wifiEnabled = doc["wifiEnabled"] | false;
+      settings.weatherEnabled = doc["weatherEnabled"] | false;
       String shapeStr = doc["displayShape"] | "square";
       settings.displayShape = (shapeStr == "round") ? SHAPE_ROUND : SHAPE_SQUARE;
 
@@ -1352,6 +1407,15 @@ void loadSettings() {
       settings.scrollText.text = scrollText["text"] | "Chào mừng đến với Mochi Watch!";
       settings.scrollText.speed = scrollText["speed"] | 35;
       settings.scrollText.textColor = scrollText["textColor"] | TFT_WHITE;
+
+      // Tải cài đặt Weather Station
+      settings.stationSsid = doc["stationSsid"] | "";
+      settings.stationPassword = doc["stationPassword"] | "";
+      settings.owmApiKey = doc["owmApiKey"] | "";
+      settings.owmCityId = doc["owmCityId"] | "1566083";
+      settings.latitude = doc["latitude"] | "";
+      settings.longitude = doc["longitude"] | "";
+      settings.language = doc["language"] | "vi";
 
       success = true;
     }
@@ -1372,11 +1436,21 @@ void loadSettings() {
     settings.musicAutoPlayNext = true;
     settings.bluetoothEnabled = true;
     settings.wifiEnabled = false;
+    settings.weatherEnabled = false;
     settings.displayShape = SHAPE_SQUARE;
 
     settings.scrollText.text = "Hello! Dasai Mochi.";
     settings.scrollText.speed = 35;
     settings.scrollText.textColor = TFT_YELLOW;
+
+    // Giá trị mặc định cho Weather Station
+    settings.stationSsid = "";
+    settings.stationPassword = "";
+    settings.owmApiKey = "";
+    settings.owmCityId = "1566083";
+    settings.latitude = "";
+    settings.longitude = "";
+    settings.language = "vi";
 
     saveSettings();
   }

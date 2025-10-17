@@ -141,3 +141,24 @@ String extractTimeSafe(const String& text) {
   return "";
 }
 
+String formatFloatSmart(float value)
+{
+    if (fabs(value - int(value)) < 0.05)
+    {
+        return String(int(round(value)));
+    }
+    else
+    {
+        return String(value, 1);
+    }
+}
+
+String replaceAllUtf8(String src, const String& target, const String& replacement) {
+  int idx = src.indexOf(target);
+  while (idx != -1) {
+    src = src.substring(0, idx) + replacement + src.substring(idx + target.length());
+    idx = src.indexOf(target, idx + replacement.length());
+  }
+  return src;
+}
+

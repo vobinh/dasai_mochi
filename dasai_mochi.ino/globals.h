@@ -3,6 +3,11 @@
 
 #include <Arduino.h>
 
+// --- CÁC HẰNG SỐ TOÀN CỤC ---
+#define CONFIG_FILE "/config.json"
+#define SD_CS_PIN 7
+#define DYNAMIC_VIDEO_FILE "/video_custom.bin"
+
 enum ButtonAction {
   ACTION_NONE,
   ACTION_SINGLE,
@@ -30,7 +35,8 @@ enum Mode {
   SCROLL_TEXT_MODE,
   SLIDESHOW_MODE,
   WIFI_UPLOAD_MODE,
-  DYNAMIC_VIDEO_MODE
+  DYNAMIC_VIDEO_MODE,
+  WEATHER_STATION_MODE
 };
 
 struct ScrollTextSettings {
@@ -54,6 +60,16 @@ struct AppSettings {
   ScrollTextSettings scrollText;
   bool bluetoothEnabled;
   bool wifiEnabled;
+  bool weatherEnabled;
+
+  // Cài đặt cho Weather Station
+  String stationSsid;
+  String stationPassword;
+  String owmApiKey;
+  String owmCityId;
+  String latitude;
+  String longitude;
+  String language;
 };
 
 // =======================================================================================
@@ -62,7 +78,7 @@ struct AppSettings {
 
 // --- Số lượng mục ---
 const int NUM_SETTING_ITEMS_CONST = 12;
-const int NUM_MODE_ITEMS_CONST = 11;
+const int NUM_MODE_ITEMS_CONST = 12;
 const int NUM_SCROLL_TEXT_SETTINGS_ITEMS_CONST = 4;
 
 // --- Tiếng Việt ---
@@ -73,8 +89,8 @@ const char* const setting_items_vi[NUM_SETTING_ITEMS_CONST] PROGMEM = {
   "Âm thanh", "Âm lượng", "Tự Động Chuyển Bài", "Bluetooth", "Hình Dạng", "Lưu", "Thoát"
 };
 const char* const mode_items_vi[NUM_MODE_ITEMS_CONST] PROGMEM = {
-  "Chơi Flappy", "Chơi Đua Xe", "Đồng hồ số", "Đồng hồ kim",
-  "Thời tiết", "Chữ chạy", "Nghe nhạc", "Trình chiếu ảnh", "Video Động", "WiFi Upload", "Thoát"
+  "Chơi Flappy", "Chơi Đua Xe", "Đồng hồ số", "Đồng hồ kim", "Thời tiết", "Trạm Thời Tiết",
+  "Chữ chạy", "Nghe nhạc", "Trình chiếu ảnh", "Video Động", "WiFi Upload", "Thoát"
 };
 const char* const scroll_text_settings_items_vi[NUM_SCROLL_TEXT_SETTINGS_ITEMS_CONST] PROGMEM = {
   "Màu Sắc", "Tốc Độ", "Xem", "Lưu & Thoát"
@@ -88,8 +104,8 @@ const char* const setting_items_en[NUM_SETTING_ITEMS_CONST] PROGMEM = {
   "Sound Enabled", "Volume", "Auto Next", "Bluetooth", "Display Shape", "Save", "Exit"
 };
 const char* const mode_items_en[NUM_MODE_ITEMS_CONST] PROGMEM = {
-  "Play Flappy", "Play Car Game", "Watch (Digital)", "Watch (Analog)",
-  "Weather", "Scroll Text", "Play Music", "Slideshow", "Dynamic Video", "WiFi Upload", "Exit"
+  "Play Flappy", "Play Car Game", "Watch (Digital)", "Watch (Analog)", "Weather", "Weather Station",
+  "Scroll Text", "Play Music", "Slideshow", "Dynamic Video", "WiFi Upload", "Exit"
 };
 const char* const scroll_text_settings_items_en[NUM_SCROLL_TEXT_SETTINGS_ITEMS_CONST] PROGMEM = {
   "Color", "Speed", "View", "Save & Exit"

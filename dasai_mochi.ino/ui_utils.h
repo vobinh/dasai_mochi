@@ -3,6 +3,7 @@
 
 #include <TFT_eSPI.h>
 #include "FontMaker.h"
+#include <math.h>
 
 // Khai báo các biến toàn cục sẽ được sử dụng bởi các hàm tiện ích
 // Các biến này được định nghĩa trong tệp .ino chính
@@ -28,5 +29,11 @@ void drawMarqueeText(TFT_eSprite* sprite, MakeFont* font, String text, int16_t x
 void drawMarqueeText(TFT_eSprite* sprite, String text, int16_t x, int16_t y, int16_t width, uint16_t textColor, uint16_t bgColor, bool isSelected, uint32_t speed_ms);
 
 String extractTimeSafe(const String& text);
+
+void drawWeatherIcon(int iconIndex, int x, int y);
+
+String formatFloatSmart(float value);
+
+String replaceAllUtf8(String src, const String& target, const String& replacement);
 
 #endif // UI_UTILS_H

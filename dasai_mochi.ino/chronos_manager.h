@@ -10,11 +10,12 @@ struct WeatherData {
   String city;
   String updateTime;
   int currentTemp;
-  int highTemp;
-  int lowTemp;
+  float highTemp;
+  float lowTemp;
   int icon;
   int pressure;
-  int uv;
+  float uv;
+  float wind_speed;
 };
 
 // *** ENUM ĐÃ ĐƯỢC BỔ SUNG ĐẦY ĐỦ TỪ FILE THAM KHẢO ***
