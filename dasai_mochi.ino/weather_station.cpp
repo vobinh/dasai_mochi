@@ -128,23 +128,22 @@ void weather_station_init(TFT_eSPI *tft, TFT_eSprite *sprite, MakeFont *font, Ap
   _settings = settings;
 }
 
-void weather_station_enter()
-{
-    weatherStationDataValid = false;
-    weatherStationStatus = "Đang khởi tạo...";
-    lastWeatherFetchTime = 0; // Reset thời gian fetch khi vào
-    timeSyncedNTP = false;
-    currentView = VIEW_MAIN;
-    slideshowImagesLoaded = false;
-    wifiConnectionFailures = 0;
-    firstEnter = true; // Đánh dấu là lần vào đầu tiên
-    isLoading = true; // Đặt isLoading = true cho lần vào đầu tiên
-    restoreTimeFromRTC();
-    drawLoadingScreen(3, "Bắt đầu..."); // Vẽ loading screen ban đầu
-    ws_loadDynamicVideo();
-    ws_lastVideoFrameTime = 0;
-    ws_currentFrame = 0;
-    dailyForecasts.clear();
+void weather_station_enter() {
+  weatherStationDataValid = false;
+  weatherStationStatus = "Đang khởi tạo...";
+  lastWeatherFetchTime = 0;  // Reset thời gian fetch khi vào
+  timeSyncedNTP = false;
+  currentView = VIEW_MAIN;
+  slideshowImagesLoaded = false;
+  wifiConnectionFailures = 0;
+  firstEnter = true;  // Đánh dấu là lần vào đầu tiên
+  isLoading = true;   // Đặt isLoading = true cho lần vào đầu tiên
+  restoreTimeFromRTC();
+  drawLoadingScreen(3, "Bắt đầu...");  // Vẽ loading screen ban đầu
+  ws_loadDynamicVideo();
+  ws_lastVideoFrameTime = 0;
+  ws_currentFrame = 0;
+  dailyForecasts.clear();
 }
 
 void weather_station_exit() {
@@ -175,10 +174,14 @@ Mode weather_station_loop(ButtonAction action) {
   if (action == ACTION_LONG)
     return MENU;
   else if (action == ACTION_DOUBLE) {
-    refetchWeatherData();
-  } else if (action == ACTION_TRIPLE) {
     switch (currentView) {
       case VIEW_MAIN:
+        currentView = VIEW_FORECAST;
+        break;
+      case VIEW_SLIDESHOW:
+        currentView = VIEW_MAIN;
+        break;
+      case VIEW_FORECAST:
         currentView = VIEW_SLIDESHOW;
         if (!slideshowImagesLoaded) {
           Serial.println("[Slideshow] Loading images on demand...");
@@ -186,13 +189,9 @@ Mode weather_station_loop(ButtonAction action) {
           slideshowImagesLoaded = true;
         }
         break;
-      case VIEW_SLIDESHOW:
-        currentView = VIEW_FORECAST;
-        break;
-      case VIEW_FORECAST:
-        currentView = VIEW_MAIN;
-        break;
     }
+  } else if (action == ACTION_TRIPLE) {
+    refetchWeatherData();
   }
 
   // 1) WiFi
@@ -204,7 +203,6 @@ Mode weather_station_loop(ButtonAction action) {
       }
     }
     if (WiFi.status() != WL_CONNECTED) {
-      // Vẫn vẽ màn hình hiện tại ngay cả khi mất kết nối wifi (sau lần đầu)
       if (!firstEnter) {
         switch (currentView) {
           case VIEW_MAIN: drawWeatherStationScreen(); break;
@@ -233,11 +231,8 @@ Mode weather_station_loop(ButtonAction action) {
   // - HOẶC (isLoading VÀ dữ liệu chưa hợp lệ) -> Tức là đang trong lần đầu hoặc manual refetch
   bool needsInitialFetch = isLoading && (!weatherStationDataValid || dailyForecasts.empty());
   bool needsPeriodicFetch = !isLoading && (millis() - lastWeatherFetchTime > (10 * 60 * 1000));
-  if (needsInitialFetch || needsPeriodicFetch /* || needsRetryFetch */) {
-    // KHÔNG đặt isLoading = true cho periodic fetch
-    // isLoading chỉ được đặt bởi enter() và refetchWeatherData()
-    fetchWeatherData();  // Gọi hàm fetch (sẽ cập nhật lastWeatherFetchTime)
-                         // Hàm fetch chỉ vẽ loading nếu isLoading=true
+  if (needsInitialFetch || needsPeriodicFetch) {
+    fetchWeatherData();
   }
 
   // 4) Render
@@ -600,7 +595,7 @@ static void fetchWeatherData() {
       } else {
         weatherStationStatus = "Lỗi dự báo";
       }
-       if (isLoading) drawLoadingScreen(100, "Lỗi dự báo");
+      if (isLoading) drawLoadingScreen(100, "Lỗi dự báo");
     }
     // lastWeatherFetchTime đã được cập nhật ở đầu hàm
   }
@@ -684,19 +679,29 @@ static void reloadSlideshowImages() {
 
 // === DRAW SLIDESHOW SCREEN ===
 static void drawWeatherSlideshowScreen() {
+  // --- Vẽ ảnh nền slideshow (logic không đổi) ---
   if (slideshowImageFiles.empty()) {
     _sprite->fillSprite(TFT_BLACK);
-    _font->print(10, 110, "Không có ảnh", TFT_YELLOW, TFT_BLACK);
+    fontTargetSprite = _sprite;  // Đặt target trước khi dùng _font
+    // Tạm dùng font mặc định nếu _font lỗi
+    if (_font) {
+      _font->set_font(Fira_Code_16);
+      _font->print(10, 110, "Không có ảnh", TFT_YELLOW, TFT_BLACK);
+    } else {
+      _sprite->setTextFont(2);
+      _sprite->setTextColor(TFT_YELLOW, TFT_BLACK);
+      _sprite->setTextDatum(MC_DATUM);  // Canh giữa
+      _sprite->drawString("Khong co anh", _tft->width() / 2, 110);
+      _sprite->setTextDatum(TL_DATUM);  // Reset
+    }
     _sprite->pushSprite(0, 0);
     return;
   }
-
   if (millis() - lastSlideTime > 5000) {
     lastSlideTime = millis();
     currentSlideshowImageIndex = (currentSlideshowImageIndex + 1) % slideshowImageFiles.size();
-
     String imagePath = slideshowImageFiles[currentSlideshowImageIndex];
-    fs::File imageFile = SPIFFS.open(imagePath, "r");
+    File imageFile = SPIFFS.open(imagePath, "r");
     if (imageFile) {
       jpegSpriteTarget = _sprite;
       TJpgDec.setCallback(sprite_output);
@@ -705,22 +710,45 @@ static void drawWeatherSlideshowScreen() {
     }
   }
 
-  // Vẽ lớp phủ
-  // _sprite->fillRoundRect(10, 10, _tft->width() - 20, 80, 8, 0x0000); // Nền đen mờ
+  // --- Vẽ lớp phủ thời gian và icon ở góc dưới bên phải (BỐ CỤC MỚI) ---
+  int padding = 10;       // Khoảng cách lề
+  int icon_time_gap = 5;  // Khoảng cách giữa icon (phía trên) và thời gian (phía dưới)
 
-  // Vẽ icon thời tiết
-  if (weatherStationDataValid) {
-    drawWeatherIcon(weatherStationData.icon, 190, 20);
-  }
-
-  // Vẽ thời gian
   if (timeSyncedNTP) {
-    _sprite->setFreeFont(&Digitall0124pt7b);
+    // 1. Chuẩn bị font và text cho thời gian
+    _sprite->setFreeFont(&Digitall0124pt7b);      // Font giờ (nhỏ hơn)
+    _sprite->setTextColor(TFT_WHITE);  // Chữ trắng
+    _sprite->setTextDatum(BR_DATUM);              // Canh dưới phải (Bottom Right)
     char timeStr[6];
     sprintf(timeStr, "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
-    _sprite->setTextColor(TFT_WHITE);
-    _sprite->drawString(timeStr, 95, 190);
+
+    // 2. Tính toán vị trí THỜI GIAN
+    int time_x = _tft->width() - padding;
+    int time_y = _tft->height() - padding;
+    int time_w = _sprite->textWidth(timeStr);  // Lấy chiều rộng chữ thời gian
+    int time_h = _sprite->fontHeight();        // Lấy chiều cao font
+
+    // 3. Vẽ THỜI GIAN
+    _sprite->drawString(timeStr, time_x, time_y);
+
+    // 4. Vẽ ICON thời tiết (nếu có dữ liệu) - PHÍA TRÊN và CANH GIỮA thời gian
+    if (weatherStationDataValid) {
+      // Tính toán X để icon canh giữa phía trên chữ thời gian
+      int icon_center_x = time_x - (time_w / 2);     // Tâm X của icon = Tâm X của thời gian
+      int icon_x = icon_center_x - (WEATHER_W / 2);  // Tọa độ X góc trái của icon
+
+      // Tính toán Y để icon nằm phía trên thời gian
+      int icon_y = time_y - time_h - icon_time_gap - WEATHER_H;  // Y = baseline chữ - chiều cao chữ - khoảng cách - chiều cao icon
+
+      fontTargetSprite = _sprite;  // Đảm bảo target đúng
+      drawWeatherIcon(weatherStationData.icon, icon_x, icon_y);
+    }
+
+    // 5. Reset font và datum
+    _sprite->setFreeFont(NULL);
+    _sprite->setTextDatum(TL_DATUM);
   }
+  // --- Kết thúc vẽ lớp phủ ---
 
   _sprite->pushSprite(0, 0);
 }
@@ -979,9 +1007,9 @@ static void drawForecastScreen() {
   int top_section_y = 10;
   int today_icon_x = 20;
   int today_icon_y = top_section_y + 25;
-  int today_temp_x = today_icon_x + WEATHER_W + 15; 
+  int today_temp_x = today_icon_x + WEATHER_W + 15;
   int today_temp_y = today_icon_y + 5;
-  int today_hilow_y = today_temp_y + 45;   // Dưới nhiệt độ lớn
+  int today_hilow_y = today_temp_y + 45;  // Dưới nhiệt độ lớn
   int today_desc_y = today_hilow_y + 25;  // Dưới mô tả
 
 
@@ -1002,7 +1030,7 @@ static void drawForecastScreen() {
   if (timeSyncedNTP) {
     char timeStr[6];
     sprintf(timeStr, "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
-    _font->print(today_icon_x, top_section_y, weatherStationData.city +" "+ timeStr, TFT_WHITE, TFT_BLACK);
+    _font->print(today_icon_x, top_section_y, weatherStationData.city + " " + timeStr, TFT_WHITE, TFT_BLACK);
   } else {
     _font->print(today_icon_x, top_section_y, weatherStationData.city, TFT_WHITE, TFT_BLACK);
   }
