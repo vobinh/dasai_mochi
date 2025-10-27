@@ -268,13 +268,34 @@ Mode menu_handle_action(ButtonAction action) {
       currentEditMode = EDIT_NONE;
     }
   } else {
-    if (action == ACTION_DOUBLE) {
+    if (action == ACTION_TRIPLE) {
       currentTab = (currentTab == TAB_SETTING) ? TAB_MODE : TAB_SETTING;
       selectedMenuItem = 0;
       menuScrollOffset = 0;
     } else if (action == ACTION_SINGLE) {
       int maxItems = (currentTab == TAB_SETTING) ? NUM_SETTING_ITEMS_CONST : NUM_MODE_ITEMS_CONST;
       selectedMenuItem = (selectedMenuItem + 1) % maxItems;
+      int maxVisibleItems = (temp_settings.displayShape == SHAPE_ROUND) ? 5 : 6;
+
+      if (temp_settings.displayShape == SHAPE_ROUND) {
+        const int centerSlot = maxVisibleItems / 2;
+        menuScrollOffset = selectedMenuItem - centerSlot;
+        if (menuScrollOffset < 0) menuScrollOffset = 0;
+        if (maxItems > maxVisibleItems) {
+          if (menuScrollOffset > maxItems - maxVisibleItems) {
+            menuScrollOffset = maxItems - maxVisibleItems;
+          }
+        } else {
+          menuScrollOffset = 0;
+        }
+      } else {
+        if (selectedMenuItem == 0) menuScrollOffset = 0;
+        else if (selectedMenuItem >= menuScrollOffset + maxVisibleItems) menuScrollOffset = selectedMenuItem - maxVisibleItems + 1;
+        else if (selectedMenuItem < menuScrollOffset) menuScrollOffset = selectedMenuItem;
+      }
+    } else if (action == ACTION_DOUBLE) {
+      int maxItems = (currentTab == TAB_SETTING) ? NUM_SETTING_ITEMS_CONST : NUM_MODE_ITEMS_CONST;
+      selectedMenuItem = (selectedMenuItem - 1 + maxItems) % maxItems;
       int maxVisibleItems = (temp_settings.displayShape == SHAPE_ROUND) ? 5 : 6;
 
       if (temp_settings.displayShape == SHAPE_ROUND) {
@@ -324,10 +345,8 @@ Mode menu_handle_action(ButtonAction action) {
           case 5: return WEATHER_STATION_MODE;
           case 6: return SCROLL_TEXT_MODE;
           case 7: return MUSIC_LIST_MODE;
-          case 8: return SLIDESHOW_MODE;
-          case 9: return DYNAMIC_VIDEO_MODE;
-          case 10: return WIFI_UPLOAD_MODE;
-          case 11: return PLAYING;
+          case 8: return WIFI_UPLOAD_MODE;
+          case 9: return PLAYING;
         }
       }
     }

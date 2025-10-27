@@ -48,12 +48,6 @@ TFT_eSprite *fontTargetSprite = nullptr;  // Con trỏ để chỉ định sprit
 
 static uint32_t lastUserInteractionTime = 0;
 static bool isIdleVideoActive = false;
-// --- Slideshow variables ---
-static std::vector<String> imageFiles;
-static int currentImageIndex = 0;
-static uint32_t lastSlideTime = 0;
-
-// bool newBundleUploaded = false;
 
 void setSpritePixel_dynamic(int16_t x, int16_t y, uint16_t color) {
   if (fontTargetSprite) {
@@ -147,45 +141,14 @@ void drawScrollTextSettingsScreen();
 void initScrollTextSettings();
 void populateMenuText(JsonDocument &doc);
 
-void drawSlideshowScreen();
-void reloadImageList();
 void drawWifiUploadScreen();
-bool loadDynamicVideo(const char *path);
-void closeDynamicVideo();
-void drawDynamicVideoFrame(uint16_t frame_index);
-void wifi_manager_save_settings(); // Forward declaration
+void wifi_manager_save_settings();  // Forward declaration
 // =======================================================================================
 // --- CÁC HÀM TIỆN ÍCH VÀ CALLBACK CHO VIỆC VẼ ---
 // =======================================================================================
 
 // Con trỏ toàn cục để trỏ đến sprite mục tiêu khi vẽ JPEG
 TFT_eSprite *jpegSpriteTarget = nullptr;
-
-
-void reloadImageList() {
-  imageFiles.clear();
-  File root = SPIFFS.open("/");
-  if (!root) {
-    Serial.println("Failed to open root directory");
-    return;
-  }
-  File file = root.openNextFile();
-  while (file) {
-    String fileName = String(file.name());
-    String checkName = fileName.startsWith("/") ? fileName.substring(1) : fileName;
-
-    if (checkName.startsWith("ss_") && !file.isDirectory()) {
-      String fullPath = "/" + checkName;
-      imageFiles.push_back(fullPath);
-    }
-    file = root.openNextFile();
-  }
-  root.close();
-
-  currentImageIndex = 0;
-  lastSlideTime = 0;  // Reset thời gian để hiển thị ảnh đầu tiên ngay lập tức
-  Serial.printf("Found %d images for slideshow.\n", imageFiles.size());
-}
 
 void drawWifiUploadScreen() {
   screenSprite.fillSprite(TFT_BLACK);
@@ -203,46 +166,6 @@ void drawWifiUploadScreen() {
   myfont.print((tft.width() - myfont.getLength(exitMsg)) / 2, 210, exitMsg, TFT_RED, TFT_BLACK);
 
   screenSprite.pushSprite(0, 0);
-}
-
-void drawSlideshowScreen() {
-  if (imageFiles.empty()) {
-    screenSprite.fillSprite(TFT_BLACK);
-    myfont.print(10, 110, "Khong co anh", TFT_YELLOW, TFT_BLACK);
-    screenSprite.pushSprite(0, 0);
-    return;
-  }
-
-  // Chỉ vẽ lại khi đến lúc chuyển slide
-  if (millis() - lastSlideTime > 5000) {
-    lastSlideTime = millis();
-
-    String imagePath = imageFiles[currentImageIndex];
-
-    File imageFile = SPIFFS.open(imagePath, "r");
-    if (imageFile) {
-      // 1. Hướng đầu ra của bộ giải mã vào sprite
-      jpegSpriteTarget = &screenSprite;
-      TJpgDec.setCallback(sprite_output);
-
-      // 2. Giải mã hình ảnh vào bộ đệm sprite (ẩn)
-      TJpgDec.drawFsJpg(0, 0, imageFile);
-      imageFile.close();
-
-      // 3. Đẩy toàn bộ sprite đã hoàn chỉnh ra màn hình cùng một lúc
-      screenSprite.pushSprite(0, 0);
-
-      // 4. Quan trọng: Trả lại callback về mặc định
-      TJpgDec.setCallback(tft_output);
-    } else {
-      Serial.println("Failed to open image: " + imagePath);
-      screenSprite.fillSprite(TFT_BLACK);
-      myfont.print(10, 110, "Loi mo anh", TFT_RED, TFT_BLACK);
-      screenSprite.pushSprite(0, 0);
-    }
-
-    currentImageIndex = (currentImageIndex + 1) % imageFiles.size();
-  }
 }
 
 // Callback để vẽ JPEG trực tiếp lên màn hình (cho video)
@@ -375,30 +298,30 @@ void drawMusicPlayerScreen() {
 // }
 
 void drawWeatherIcon(int iconIndex, int x, int y) {
-    if (iconIndex < 0 || iconIndex >= (sizeof(weather_icons) / sizeof(weather_icons[0]))) {
-        iconIndex = 7; // Mặc định là icon "Unknown" nếu chỉ số không hợp lệ
+  if (iconIndex < 0 || iconIndex >= (sizeof(weather_icons) / sizeof(weather_icons[0]))) {
+    iconIndex = 7;  // Mặc định là icon "Unknown" nếu chỉ số không hợp lệ
+  }
+  // Đọc con trỏ từ PROGMEM
+  const uint16_t *icon_ptr = (const uint16_t *)pgm_read_ptr(&weather_icons[iconIndex]);
+
+  // Tạo một bộ đệm trên stack để chứa một dòng của icon
+  uint16_t line_buffer[WEATHER_W];
+
+  // Lặp qua từng dòng (y) và từng pixel (x) của icon
+  for (int j = 0; j < WEATHER_H; j++) {
+    // Sao chép một dòng từ PROGMEM vào bộ đệm RAM để tăng tốc độ truy cập
+    memcpy_P(line_buffer, &icon_ptr[j * WEATHER_W], WEATHER_W * 2);
+
+    for (int i = 0; i < WEATHER_W; i++) {
+      uint16_t color = line_buffer[i];
+      // Chỉ vẽ pixel nếu nó không phải là màu đen (màu trong suốt)
+      if (color != TFT_BLACK) {
+        // *** SỬA LỖI MÀU: Hoán đổi byte cao và byte thấp của màu ***
+        uint16_t swapped_color = (color << 8) | (color >> 8);
+        screenSprite.drawPixel(x + i, y + j, swapped_color);
+      }
     }
-    // Đọc con trỏ từ PROGMEM
-    const uint16_t *icon_ptr = (const uint16_t *)pgm_read_ptr(&weather_icons[iconIndex]);
-
-    // Tạo một bộ đệm trên stack để chứa một dòng của icon
-    uint16_t line_buffer[WEATHER_W];
-
-    // Lặp qua từng dòng (y) và từng pixel (x) của icon
-    for (int j = 0; j < WEATHER_H; j++) {
-        // Sao chép một dòng từ PROGMEM vào bộ đệm RAM để tăng tốc độ truy cập
-        memcpy_P(line_buffer, &icon_ptr[j * WEATHER_W], WEATHER_W * 2);
-
-        for (int i = 0; i < WEATHER_W; i++) {
-            uint16_t color = line_buffer[i];
-            // Chỉ vẽ pixel nếu nó không phải là màu đen (màu trong suốt)
-            if (color != TFT_BLACK) {
-                // *** SỬA LỖI MÀU: Hoán đổi byte cao và byte thấp của màu ***
-                uint16_t swapped_color = (color << 8) | (color >> 8);
-                screenSprite.drawPixel(x + i, y + j, swapped_color);
-            }
-        }
-    }
+  }
 }
 
 String getWeatherLabel(int iconIndex) {
@@ -829,7 +752,7 @@ void setup() {
   if (settings.wifiEnabled) {
     Serial.println("*** WiFi Only Boot Mode Activated! ***");
     button_init();
-    
+
     wifi_manager_init(&settings);
     wifi_manager_connect();
 
@@ -855,7 +778,7 @@ void setup() {
     loadUiStrings();
     chronos_init(&tft, &screenSprite, &myfont, &settings);
     audio_init();
-   
+
     audio_set_volume(0);
 
     TJpgDec.setJpgScale(1);
@@ -873,8 +796,6 @@ void setup() {
     audio_set_volume(settings.volume);
     audio_set_autoplay(settings.musicAutoPlayNext);
     loadAudioTracklist();
-
-    loadDynamicVideo(DYNAMIC_VIDEO_FILE);
 
     hourHandSprite.createSprite(HOUR_HAND_WIDTH, HOUR_HAND_HEIGHT);
     hourHandSprite.setPivot(HOUR_PIVOT_X, HOUR_PIVOT_Y);
@@ -1076,19 +997,9 @@ void loop() {
             audio_set_autoplay(settings.musicAutoPlayNext);
           }
           currentMode = newMode;
-          if (currentMode == SLIDESHOW_MODE) {
-            reloadImageList();
-          }
-          if (currentMode == DYNAMIC_VIDEO_MODE) {
-            currentFrame = 0;  // Reset về frame đầu tiên
-            loadDynamicVideo(DYNAMIC_VIDEO_FILE);
-          }
           if (currentMode == SCROLL_TEXT_SETTINGS_MODE) {
             initScrollTextSettings();
           }
-          // if (currentMode == WEATHER_STATION_MODE) {
-          //   weather_station_enter();
-          // }
           tft.fillScreen(TFT_BLACK);
           if (currentMode == GAME_FLAPPY)
             Flappy::start();
@@ -1271,53 +1182,6 @@ void loop() {
         drawScrollTextSettingsScreen();
         break;
       }
-    case SLIDESHOW_MODE:
-      {
-        if (action == ACTION_LONG) {
-          currentMode = MENU;
-          menu_enter();
-          break;
-        }
-        drawSlideshowScreen();
-        break;
-      }
-    case DYNAMIC_VIDEO_MODE:
-      {
-        if (action == ACTION_LONG) {
-          closeDynamicVideo();
-          currentMode = MENU;
-          menu_enter(false);
-          break;
-        }
-
-        if (!dynamicVideo.is_loaded) {
-          screenSprite.fillSprite(TFT_BLACK);
-          myfont.print(10, 110, "Loi video .bin", TFT_RED, TFT_BLACK);
-          screenSprite.pushSprite(0, 0);
-          delay(1000);  // Show error for a second
-          currentMode = MENU;
-          menu_enter(false);
-          break;
-        }
-
-        drawDynamicVideoFrame(currentFrame);
-        delay(settings.frameDelay);
-        currentFrame++;
-        if (currentFrame >= dynamicVideo.num_frames) {
-          currentFrame = 0;
-        }
-        break;
-      }
-    // case WEATHER_STATION_MODE:
-    //   {
-    //     Mode newMode = weather_station_loop(action);
-    //     if (newMode != WEATHER_STATION_MODE) {
-    //       weather_station_exit();
-    //       currentMode = newMode;
-    //       menu_enter();
-    //     }
-    //     break;
-    //   }
   }
 }
 
@@ -1546,77 +1410,4 @@ void loadUiStrings() {
       scrollTextSettingsItems[i] = FPSTR(pgm_read_ptr(&items_pgm[i]));
     }
   }
-}
-
-// --- CÁC HÀM XỬ LÝ VIDEO ĐỘNG TỪ FILE .BIN ---
-// =======================================================================================
-// --- DYNAMIC VIDEO FUNCTIONS (STREAMING VERSION) ---
-// =======================================================================================
-void closeDynamicVideo() {
-  if (dynamicVideo.is_loaded) {
-    if (dynamicVideo.index_table != nullptr) {
-      delete[] dynamicVideo.index_table;
-      dynamicVideo.index_table = nullptr;
-    }
-    dynamicVideo.is_loaded = false;
-    dynamicVideo.num_frames = 0;
-    Serial.println("Dynamic video resources released.");
-  }
-}
-
-bool loadDynamicVideo(const char *path) {
-  closeDynamicVideo();
-  Serial.printf("Loading dynamic video index from SPIFFS: %s\n", path);
-  File videoFile = SPIFFS.open(path, "r");
-  if (!videoFile) {
-    Serial.println("Failed to open dynamic video file for indexing.");
-    return false;
-  }
-  videoFile.read((uint8_t *)&dynamicVideo.num_frames, sizeof(uint32_t));
-  if (dynamicVideo.num_frames == 0) {
-    Serial.println("Video file is empty or header is invalid.");
-    videoFile.close();
-    return false;
-  }
-  Serial.printf("Video has %d frames.\n", dynamicVideo.num_frames);
-  dynamicVideo.index_table = new (std::nothrow) FrameInfo[dynamicVideo.num_frames];
-  if (dynamicVideo.index_table == nullptr) {
-    Serial.println("Failed to allocate memory for index table.");
-    videoFile.close();
-    return false;
-  }
-  size_t table_size = dynamicVideo.num_frames * sizeof(FrameInfo);
-  videoFile.read((uint8_t *)dynamicVideo.index_table, table_size);
-  videoFile.close();  // Đóng file ngay sau khi đọc xong index
-  dynamicVideo.is_loaded = true;
-  Serial.println("Dynamic video index loaded successfully.");
-  return true;
-}
-
-void drawDynamicVideoFrame(uint16_t frame_index) {
-  if (!dynamicVideo.is_loaded || frame_index >= dynamicVideo.num_frames) return;
-
-  File frameFile = SPIFFS.open(DYNAMIC_VIDEO_FILE, "r");
-  if (!frameFile) {
-    Serial.println("Failed to re-open dynamic video file for frame.");
-    return;
-  }
-
-  FrameInfo info = dynamicVideo.index_table[frame_index];
-  frameFile.seek(info.offset);
-
-  // 1. Hướng đầu ra của bộ giải mã vào sprite
-  jpegSpriteTarget = &screenSprite;
-  TJpgDec.setCallback(sprite_output);
-
-  // 2. Giải mã hình ảnh vào bộ đệm sprite (ẩn)
-  TJpgDec.drawFsJpg(0, 0, frameFile);
-
-  // 3. Đẩy toàn bộ sprite đã hoàn chỉnh ra màn hình cùng một lúc
-  screenSprite.pushSprite(0, 0);
-
-  // 4. Quan trọng: Trả lại callback về mặc định để không ảnh hưởng các chức năng khác
-  TJpgDec.setCallback(tft_output);
-
-  frameFile.close();
 }
