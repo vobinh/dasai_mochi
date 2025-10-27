@@ -68,6 +68,7 @@ struct AppSettings {
   String latitude;
   String longitude;
   String language;
+  int gmtOffsetHours;
 };
 
 // =======================================================================================

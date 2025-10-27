@@ -223,6 +223,10 @@ h2{color:var(--accent);margin-top:1.5rem;border-bottom:1px solid #333;padding-bo
         <label for="lon">Longitude</label>
         <input type="text" id="lon" name="lon" value=")rawliteral" +_settings->longitude + R"rawliteral(">
       </div>
+      <div class="form-group">
+        <label for="gmt">Múi giờ GMT (Giờ, ví dụ: 7, -5)</label>
+        <input type="number" id="gmt" name="gmt" value=")rawliteral" + String(_settings->gmtOffsetHours) + R"rawliteral(" min="-12" max="14" step="1" required>
+      </div>
       <button type="submit" class="btn-save">Lưu Cài Đặt</button>
     </form>
   </div>
@@ -359,6 +363,20 @@ static void handleSaveSettings() {
         changed = true;
     }
 
+    if (server.hasArg("gmt")) {
+        int new_gmt = server.arg("gmt").toInt(); // Chuyển đổi sang số nguyên
+        // Validate giá trị GMT (ví dụ: từ -12 đến +14)
+        if (new_gmt >= -12 && new_gmt <= 14) {
+             if (new_gmt != _settings->gmtOffsetHours) {
+                _settings->gmtOffsetHours = new_gmt;
+                changed = true;
+                Serial.printf("GMT Offset updated to: %d\n", new_gmt); // Log
+             }
+        } else {
+            Serial.printf("Warning: Invalid GMT Offset value received: %s\n", server.arg("gmt").c_str());
+        }
+    }
+
     if (changed) {
         wifi_manager_save_settings(); // Gọi hàm lưu file config
     }
@@ -446,6 +464,7 @@ void wifi_manager_save_settings() {
     doc["owmCityId"] = _settings->owmCityId;
     doc["latitude"] = _settings->latitude;
     doc["longitude"] = _settings->longitude;
+    doc["gmtOffsetHours"] = _settings->gmtOffsetHours;
 
     if (serializeJson(doc, configFile) == 0) {
         Serial.println(F("Failed to write to file"));

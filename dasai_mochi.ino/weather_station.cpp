@@ -24,7 +24,7 @@ extern bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *b
 
 // --- CẤU HÌNH NTP ---
 #define NTP_SERVER "pool.ntp.org"
-#define GMT_OFFSET_SEC (7 * 3600)
+// #define GMT_OFFSET_SEC (7 * 3600)
 #define DAYLIGHT_OFFSET_SEC 0
 
 
@@ -289,7 +289,8 @@ static void initNTP() {
   // Chỉ vẽ loading nếu đang loading lần đầu hoặc đang fetch lại
   if (isLoading) drawLoadingScreen(45, weatherStationStatus);
 
-  configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER);
+  long gmtOffsetSec = (long)_settings->gmtOffsetHours * 3600;
+  configTime(gmtOffsetSec, DAYLIGHT_OFFSET_SEC, NTP_SERVER);
   unsigned long ntp_start_time = millis();
   while (!getLocalTime(&timeinfo, 1000)) {
     // Chỉ vẽ loading nếu đang loading lần đầu hoặc đang fetch lại

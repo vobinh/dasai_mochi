@@ -1249,6 +1249,7 @@ void saveSettings() {
   doc["owmCityId"] = settings.owmCityId;
   doc["latitude"] = settings.latitude;
   doc["longitude"] = settings.longitude;
+  doc["gmtOffsetHours"] = settings.gmtOffsetHours;
 
   JsonObject scrollText = doc.createNestedObject("scrollText");
   scrollText["text"] = settings.scrollText.text;
@@ -1311,6 +1312,7 @@ void loadSettings() {
       settings.owmCityId = doc["owmCityId"] | "1566083";
       settings.latitude = doc["latitude"] | "";
       settings.longitude = doc["longitude"] | "";
+      settings.gmtOffsetHours = doc["gmtOffsetHours"] | 7;
       settings.language = doc["language"] | "vi";
 
       success = true;
@@ -1346,6 +1348,7 @@ void loadSettings() {
     settings.owmCityId = "1566083";
     settings.latitude = "";
     settings.longitude = "";
+    settings.gmtOffsetHours = 7;
     settings.language = "vi";
 
     saveSettings();
