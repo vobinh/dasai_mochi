@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TTF → GFX (.h) theo từ/chuỗi – nhẹ tối đa</title>
+  <style>
+    :root{--bg:#0b0e11;--fg:#e7eaf1;--muted:#9aa4b2;--accent:#61dafb;--card:#131820;--ok:#22c55e;--warn:#f59e0b;--err:#ef4444}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.35 system-ui,Segoe UI,Roboto}
+    .wrap{max-width:1200px;margin:24px auto;padding:0 16px}
+    h1{font-size:20px;display:flex;align-items:center;gap:10px}
+    .card{background:var(--card);border:1px solid #1f2630;border-radius:14px;padding:16px;margin:12px 0}
+    label{display:block;margin:8px 0 6px;color:var(--muted)} input[type="number"],input[type="text"],textarea,select{width:100%;background:#0f141b;color:var(--fg);border:1px solid #222b36;border-radius:10px;padding:10px}
+    textarea{min-height:90px}
+    .row{display:grid;gap:12px}
+    .row.cols-2{grid-template-columns:1fr 1fr}
+    .row.cols-3{grid-template-columns:1fr 1fr 1fr}
+    button{background:#1b2330;color:var(--fg);border:1px solid #293041;border-radius:10px;padding:10px 14px;cursor:pointer}
+    button.primary{background:linear-gradient(180deg,#1e90ff,#0072ff);border:none}
+    button.good{background:linear-gradient(180deg,#22c55e,#16a34a);border:none}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre}
+    .kbd{display:inline-block;border:1px solid #2a3344;border-bottom-width:3px;border-radius:6px;padding:0 6px;background:#111722;font:12px/20px ui-monospace}
+    .pill{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid #2a3344;border-radius:999px;color:var(--muted)}
+    .grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
+    canvas{background:#0b0e11;border:1px dashed #2a3344;border-radius:8px}
+    .hint{color:var(--muted);font-size:12px}
+  </style>
+  <!-- opentype.js CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/opentype.js/1.3.4/opentype.min.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <h1>🅰️ TTF → GFX (.h) theo <em>từ/chuỗi</em> – tiết kiệm dung lượng</h1>
+    <div class="card">
+      <div class="row cols-3">
+        <div>
+          <label>Font TTF/OTF</label>
+          <input id="fontFile" type="file" accept=".ttf,.otf" />
+          <div id="fontInfo" class="hint">Chưa chọn font…</div>
+        </div>
+        <div>
+          <label>Cỡ chữ (px)</label>
+          <input id="fontSize" type="number" value="32" min="6" max="200" />
+          <div class="hint">Khuyên dùng 16–64 cho TFT 240×240</div>
+        </div>
+        <div>
+          <label>Tên bộ font (.h)</label>
+          <input id="familyName" type="text" placeholder="MyFont24" value="MyFont24" />
+          <div class="hint">Sẽ tạo MyFont24.h với struct GFXfont</div>
+        </div>
+      </div>
+      <div class="row cols-2">
+        <div>
+          <label>Danh sách TỪ/CHUỖI (phân tách bằng dấu phẩy, xuống dòng đều được)</label>
+          <textarea id="words" placeholder="Ví dụ:
+Xin chào, 12:45, Thứ 2, %R, Start, STOP"></textarea>
+          <div class="hint">Tool sẽ tự lấy tất cả ký tự xuất hiện trong danh sách này (bao gồm khoảng trắng, dấu, tiếng Việt).</div>
+        </div>
+        <div>
+          <label>Tùy chọn</label>
+          <div class="grid">
+            <label class="pill"><input id="antialias" type="checkbox" checked> Khử răng cưa (AA)</label>
+            <label class="pill"><input id="pack1bpp" type="checkbox" checked> Xuất bitmap 1bpp (nén bit)</label>
+            <label class="pill"><input id="tightBB" type="checkbox" checked> Bounding box chặt</label>
+            <label class="pill"><input id="includeSpace" type="checkbox" checked> Bổ sung khoảng trắng (U+0020)</label>
+            <label class="pill"><input id="forceASCII" type="checkbox"> Ép kèm ASCII cơ bản (32–126)</label>
+          </div>
+          <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="primary" id="btnExtract">1) Phân tích & xem trước</button>
+            <button class="good" id="btnDownload" disabled>2) Tải .h</button>
+          </div>
+          <div id="stat" class="hint" style="margin-top:8px"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Xem trước glyph</h3>
+      <div class="row cols-2">
+        <canvas id="preview" width="600" height="240"></canvas>
+        <div>
+          <label>Mã nguồn .h (rút gọn)</label>
+          <textarea id="headerOut" class="mono" style="min-height:220px"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="hint">Ghi chú: Định dạng xuất là <span class="kbd">GFXfont</span> (Adafruit_GFX) gồm mảng <span class="kbd">Bitmaps</span>, mảng <span class="kbd">Glyphs</span> và struct <span class="kbd">GFXfont</span>. Dùng được với <span class="kbd">TFT_eSPI</span> qua <span class="kbd">setFreeFont(&MyFont24)</span>. Nếu bạn muốn dạng .vlw (Smooth Font) báo mình để mình bổ sung.</div>
+    </div>
+  </div>
+
+<script>
+let font;
+let lastResult = null;
+const $ = id => document.getElementById(id);
+
+$('fontFile').addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const buf = await f.arrayBuffer();
+  font = opentype.parse(buf);
+  $('fontInfo').textContent = `${font.names.fullName?.en || f.name} – unitsPerEm=${font.unitsPerEm}, asc=${font.ascender}, desc=${font.descender}`;
+  if (!$('familyName').value) $('familyName').value = (font.names.fullName?.en || 'MyFont') + $('fontSize').value;
+});
+
+$('btnExtract').addEventListener('click', () => {
+  if (!font) { alert('Chưa chọn font'); return; }
+  const px = parseInt($('fontSize').value||'24',10);
+  const wordsRaw = $('words').value.trim();
+  const opts = {
+    antialias: $('antialias').checked,
+    pack1bpp: $('pack1bpp').checked,
+    tightBB: $('tightBB').checked,
+    includeSpace: $('includeSpace').checked,
+    forceASCII: $('forceASCII').checked
+  };
+
+  const set = collectChars(wordsRaw, opts);
+  const res = buildGFX(font, px, Array.from(set).sort((a,b)=>a.codePointAt(0)-b.codePointAt(0)), opts, $('familyName').value || 'MyFont'+px);
+  lastResult = res;
+  $('headerOut').value = res.header.slice(0, 5000) + (res.header.length>5000?"\n... (đã rút gọn xem file tải về)":'');
+  $('btnDownload').disabled = false;
+  drawPreview(res);
+  $('stat').textContent = `Ký tự: ${res.chars.length} | Bitmaps: ${prettyBytes(res.bitmapBytes)} | Header: ${prettyBytes(res.header.length)} | ascent=${res.ascent}px descent=${res.descent}px`;
+});
+
+$('btnDownload').addEventListener('click', () => {
+  if (!lastResult) return;
+  downloadText(lastResult.headerFileName, lastResult.header);
+});
+
+function collectChars(wordsRaw, opts){
+  let chars = new Set();
+  if (wordsRaw) {
+    for (const ch of wordsRaw) chars.add(ch);
+  }
+  if (opts.includeSpace) chars.add(' ');
+  if (opts.forceASCII) for (let i=32;i<=126;i++) chars.add(String.fromCharCode(i));
+  // lọc ký tự trống (loại bỏ \r)
+  chars.delete('\r');
+  return chars;
+}
+
+function buildGFX(font, px, chars, opts, family){
+  const scale = px / font.unitsPerEm;
+  const ascent = Math.round(font.ascender * scale);
+  const descent = Math.round(-font.descender * scale);
+  const lineHeight = ascent + descent;
+
+  // Render từng glyph vào canvas riêng, rồi pack byte (1bpp)
+  const glyphs = [];
+  const bitmaps = [];
+  let bitmapOffset = 0;
+
+  // Tạo canvas làm việc
+  const cvs = document.createElement('canvas');
+  const ctx = cvs.getContext('2d');
+
+  for (const ch of chars){
+    const g = font.charToGlyph(ch);
+    // Kích thước hộp hợp lý
+    const gWidth = Math.ceil(((g.xMax || 0) - (g.xMin || 0)) * scale) + 4; // padding nhẹ
+    const gHeight = lineHeight + 4;
+    cvs.width = Math.max(1, gWidth);
+    cvs.height = Math.max(1, gHeight);
+    ctx.clearRect(0,0,cvs.width,cvs.height);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0,0,cvs.width,cvs.height);
+    ctx.fillStyle = '#fff';
+    ctx.imageSmoothingEnabled = !!opts.antialias;
+
+    const x = Math.round(-g.xMin * scale) + 2;
+    const y = Math.round(ascent) + 2; // baseline
+
+    const path = g.getPath(x, y, px);
+    path.draw(ctx);
+
+    // Lấy bounding box chặt nếu cần
+    let {x0,y0,w,h} = tightBoundingBox(ctx, opts.tightBB);
+    if (w===0 || h===0){ // glyph rỗng
+      glyphs.push({ ch, xAdvance: Math.round(g.advanceWidth * scale), xOffset:0, yOffset:0, w:0, h:0, bitmapOffset });
+      continue;
+    }
+
+    const img = ctx.getImageData(x0,y0,w,h);
+    const mono = to1bpp(img);
+    bitmaps.push(mono);
+
+    glyphs.push({
+      ch,
+      xAdvance: Math.round(g.advanceWidth * scale),
+      xOffset: x0, // tương đối canvas
+      yOffset: - (y - y0), // GFX dùng yOffset âm lên trên
+      w, h,
+      bitmapOffset
+    });
+    bitmapOffset += mono.length;
+  }
+
+  // Ghép bitmap
+  const bitmapAll = concatU8(bitmaps);
+
+  // Tạo header .h (GFXfont)
+  const header = emitHeaderGFX(family, px, chars, glyphs, bitmapAll, ascent, descent);
+  return { header, headerFileName: family + '.h', chars, glyphs, bitmapBytes: bitmapAll.length, ascent, descent };
+}
+
+function tightBoundingBox(ctx, enabled){
+  const w = ctx.canvas.width, h = ctx.canvas.height;
+  if (!enabled) return {x0:0,y0:0,w,h};
+  const data = ctx.getImageData(0,0,w,h).data;
+  let top=h,bottom=-1,left=w,right=-1;
+  for (let y=0;y<h;y++){
+    for (let x=0;x<w;x++){
+      const a = data[(y*w+x)*4+3];
+      if (a>10){ // threshold
+        if (y<top) top=y;
+        if (y>bottom) bottom=y;
+        if (x<left) left=x;
+        if (x>right) right=x;
+      }
+    }
+  }
+  if (bottom<top || right<left) return {x0:0,y0:0,w:0,h:0};
+  return {x0:left,y0:top,w:right-left+1,h:bottom-top+1};
+}
+
+function to1bpp(img){
+  const {width:w,height:h,data} = img;
+  const bytes = new Uint8Array(Math.ceil(w*h/8));
+  let bit=0, byte=0, idx=0;
+  for (let y=0;y<h;y++){
+    for (let x=0;x<w;x++){
+      const a = data[(y*w+x)*4+3];
+      const on = a>128; // ngưỡng
+      byte = (byte<<1) | (on?1:0);
+      bit++;
+      if (bit===8){ bytes[idx++]=byte; bit=0; byte=0; }
+    }
+  }
+  if (bit>0){ bytes[idx++] = byte << (8-bit); }
+  return bytes;
+}
+
+function emitHeaderGFX(name, px, chars, glyphs, bitmapU8, ascent, descent){
+  const guard = name.toUpperCase().replace(/[^A-Z0-9]/g,'_');
+  let out = '';
+  out += `#pragma once\n`;
+  out += `#include <stdint.h>\n`;
+  out += `#include <pgmspace.h>\n`;
+  out += `#include <Adafruit_GFX.h>\n\n`;
+  out += `// Generated by ttf2gfx-words (HTML) — size ${px}px\n`;
+
+  if (!glyphs.length) {
+    out += `// No characters selected, generating empty font.\n\n`;
+    out += `const uint8_t ${name}_Bitmaps[] PROGMEM = { 0 };\n\n`;
+    out += `const GFXglyph ${name}_Glyphs[] PROGMEM = { { 0, 0, 0, 0, 0, 0 } };\n\n`;
+    out += `const GFXfont ${name} PROGMEM = {\n`;
+    out += `  (uint8_t*)${name}_Bitmaps,\n`;
+    out += `  (GFXglyph*)${name}_Glyphs,\n`;
+    out += `  0, 0, ${px}\n`;
+    out += `};\n`;
+    return out;
+  }
+
+  out += `// Characters: "${chars.join('').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"\n\n`;
+  out += `const uint8_t ${name}_Bitmaps[] PROGMEM = {\n`;
+  out += wrapArray([...bitmapU8]) + `\n};\n\n`;
+
+  out += `const GFXglyph ${name}_Glyphs[] PROGMEM = {\n`;
+  for (let i=0;i<glyphs.length;i++){
+    const g = glyphs[i];
+    const cp = g.ch.codePointAt(0);
+    out += `  { ${g.bitmapOffset}, ${g.w}, ${g.h}, ${g.xAdvance}, ${g.xOffset}, ${g.yOffset} }, // 0x${cp.toString(16).toUpperCase()} '${safeChar(g.ch)}'\n`;
+  }
+  out += `};\n\n`;
+
+  // Lập bảng mã (first/last) theo dải: vì ký tự rời rạc, ta để first=0,last=255 nhưng giữ index mapping riêng
+  // Cách đơn giản: tạo bảng map codepoint->index để dùng kèm GFXfont mở rộng (hơi khác chuẩn). Để tương thích tối đa với Adafruit_GFX,
+  // ta sẽ ép dải từ min..max và nhét các glyph "rỗng" cho codepoint thiếu.
+  const cps = glyphs.map(g=>g.ch.codePointAt(0)).sort((a,b)=>a-b);
+  const first = cps[0], last = cps[cps.length-1];
+  const map = new Map(glyphs.map((g,i)=>[g.ch.codePointAt(0), i]));
+
+  // Xây mảng glyph đầy đủ từ first..last, điền glyph rỗng nếu không có
+  const filled = [];
+  for (let cp=first; cp<=last; cp++){
+    const idx = map.get(cp);
+    if (idx===undefined){ filled.push(`  { 0, 0, 0, ${px/2|0}, 0, 0 }, // 0x${cp.toString(16).toUpperCase()} (empty)`); }
+    else{
+      const g = glyphs[idx];
+      filled.push(`  { ${g.bitmapOffset}, ${g.w}, ${g.h}, ${g.xAdvance}, ${g.xOffset}, ${g.yOffset} }, // 0x${cp.toString(16).toUpperCase()} '${safeChar(String.fromCodePoint(cp))}'`);
+    }
+  }
+
+  out += `// Bảng đầy đủ từ 0x${first.toString(16)}..0x${last.toString(16)} để tương thích GFX\n`;
+  out += `const GFXglyph ${name}_GlyphsFull[] PROGMEM = {\n` + filled.join('\n') + `\n};\n\n`;
+
+  out += `const GFXfont ${name} PROGMEM = {\n`;
+  out += `  (uint8_t*)${name}_Bitmaps,\n`;
+  out += `  (GFXglyph*)${name}_GlyphsFull,\n`;
+  out += `  ${first}, ${last}, ${px}\n`;
+  out += `};\n`;
+
+  return out;
+}
+
+function wrapArray(arr){
+  const per = 16; let out='  ';
+  for (let i=0;i<arr.length;i++){
+    const v = arr[i];
+    out += '0x'+v.toString(16).toUpperCase().padStart(2,'0');
+    out += (i<arr.length-1?', ':'');
+    if ((i+1)%per===0) out += '\n  ';
+  }
+  return out;
+}
+
+function safeChar(ch){
+  if (ch==='\\') return '\\\\';
+  if (ch==='\'') return '\\\'';
+  if (ch==='\"') return '\\\"';
+if (ch==='\n') return '\\n';
+if (ch==='\r') return '\\r';
+if (ch==='\t') return '\\t';
+if (ch===' ') return ' ';
+// Không in được → trả về mã
+const code = ch.codePointAt(0);
+return (code>=32 && code<127)? ch : ('U+'+code.toString(16).toUpperCase());
+}
+
+function concatU8(chunks){
+  let total=0; for(const c of chunks) total+=c.length;
+  const out = new Uint8Array(total); let o=0;
+  for(const c of chunks){ out.set(c,o); o+=c.length; }
+  return out;
+}
+
+function prettyBytes(n){
+  if (n<1024) return n+' B';
+  if (n<1024*1024) return (n/1024).toFixed(1)+' KB';
+  return (n/1024/1024).toFixed(2)+' MB';
+}
+
+function downloadText(filename, text){
+  const blob = new Blob([text], {type:'text/plain'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  setTimeout(()=>URL.revokeObjectURL(url), 500);
+}
+
+function drawPreview(res){
+  const cvs = $('preview');
+  const ctx = cvs.getContext('2d');
+  ctx.clearRect(0,0,cvs.width,cvs.height);
+  ctx.fillStyle = '#0c1118';
+  ctx.fillRect(0,0,cvs.width,cvs.height);
+  ctx.fillStyle = '#9aa4b2';
+  ctx.fillText(`Ascent ${res.ascent}px  Descent ${res.descent}px`, 12, 18);
+
+  // Render nhanh bằng canvas text tiêu chuẩn (demo), bên phải là các ký tự đã chọn
+  ctx.fillStyle = '#e7eaf1';
+  ctx.font = `${$('fontSize').value}px sans-serif`;
+  const demo = '0123456789 : AMPM Xin chào – Preview';
+  ctx.fillText(demo, 12, 60);
+
+  // Vẽ dải ký tự đã chọn
+  const line = res.chars.join('');
+  ctx.fillStyle = '#61dafb';
+  wrapText(ctx, line, 12, 120, cvs.width-24, parseInt($('fontSize').value,10)+8);
+}
+
+function wrapText(ctx, text, x, y, maxWidth, lineHeight){
+  const words = Array.from(text);
+  let line='';
+  for (let n=0;n<words.length;n++){
+    const test = line + words[n];
+    const metrics = ctx.measureText(test);
+    if (metrics.width > maxWidth && n>0){
+      ctx.fillText(line, x, y); line = words[n]; y += lineHeight;
+    }else line = test;
+  }
+  ctx.fillText(line, x, y);
+}
+</script>
+</body>
+</html>

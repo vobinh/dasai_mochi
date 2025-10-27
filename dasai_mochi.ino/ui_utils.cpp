@@ -162,3 +162,68 @@ String replaceAllUtf8(String src, const String& target, const String& replacemen
   return src;
 }
 
+// void drawWeatherIcon(int iconIndex, int x, int y) {
+//      if (!fontTargetSprite) { // Kiểm tra sprite đích
+//          Serial.println("Error: fontTargetSprite is NULL in drawWeatherIcon!");
+//          return;
+//      }
+
+//     if (iconIndex < 0 || iconIndex >= (sizeof(weather_icons) / sizeof(weather_icons[0]))) {
+//         iconIndex = 7; // Mặc định là icon "Unknown" nếu chỉ số không hợp lệ
+//         Serial.printf("Warning: Invalid iconIndex %d, using default 7.\n", iconIndex);
+//     }
+//     // Đọc con trỏ từ PROGMEM
+//     const uint16_t *icon_ptr = (const uint16_t *)pgm_read_ptr(&weather_icons[iconIndex]);
+
+//     // Vẽ từng pixel, kiểm tra màu trong suốt
+//     for (int j = 0; j < WEATHER_H; j++) { // Duyệt qua các hàng (y)
+//         for (int i = 0; i < WEATHER_W; i++) { // Duyệt qua các cột (x)
+//             // Đọc màu pixel từ PROGMEM
+//             uint16_t color = pgm_read_word(&icon_ptr[j * WEATHER_W + i]);
+//             // Chỉ vẽ nếu màu không phải là màu đen (trong suốt)
+//             if (color != TFT_BLACK) {
+//                 // Hoán đổi byte để sửa lỗi màu
+//                 fontTargetSprite->drawPixel(x + i, y + j, (color >> 8) | (color << 8));
+//             }
+//         }
+//     }
+// }
+
+void drawWeatherIconScaled(int iconIndex, int x, int y, int scale) {
+    if (!fontTargetSprite) {
+        Serial.println("Error: fontTargetSprite is NULL in drawWeatherIconScaled!");
+        return;
+    }
+     if (scale <= 0) {
+         Serial.println("Error: Scale must be positive in drawWeatherIconScaled!");
+         drawWeatherIcon(iconIndex, x, y); // Vẽ kích thước gốc nếu scale lỗi
+         return;
+     }
+
+    if (iconIndex < 0 || iconIndex >= (sizeof(weather_icons) / sizeof(weather_icons[0]))) {
+        iconIndex = 7; // Mặc định
+        Serial.printf("Warning: Invalid iconIndex %d in scaled, using default 7.\n", iconIndex);
+    }
+
+    const uint16_t *icon_ptr = (const uint16_t *)pgm_read_ptr(&weather_icons[iconIndex]);
+    int scaled_w = WEATHER_W / scale;
+    int scaled_h = WEATHER_H / scale;
+
+    for (int j = 0; j < scaled_h; j++) { // Duyệt qua các hàng (y) của ảnh thu nhỏ
+        for (int i = 0; i < scaled_w; i++) { // Duyệt qua các cột (x) của ảnh thu nhỏ
+            // Tính toán vị trí pixel tương ứng trong ảnh gốc
+            int orig_x = i * scale;
+            int orig_y = j * scale;
+
+            // Đọc màu pixel từ PROGMEM tại vị trí gốc
+            uint16_t color = pgm_read_word(&icon_ptr[orig_y * WEATHER_W + orig_x]);
+
+            // Chỉ vẽ nếu màu không phải là màu đen (trong suốt)
+            if (color != TFT_BLACK) {
+                // Hoán đổi byte và vẽ pixel tại vị trí thu nhỏ
+                fontTargetSprite->drawPixel(x + i, y + j, (color >> 8) | (color << 8));
+            }
+        }
+    }
+}
+

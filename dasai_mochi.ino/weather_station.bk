@@ -1,0 +1,376 @@
+#include "weather_station.h"
+#include <WiFi.h>
+#include <WiFiClientSecure.h> // THÊM THƯ VIỆN NÀY
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <time.h> // Thư viện để lấy giờ qua NTP
+#include "chronos_manager.h" // Để lấy giờ
+#include "Digitall0132pt7b.h"
+#include "Digitall0124pt7b.h"
+#include "weather_icons.h"
+#include "ui_utils.h"
+
+// --- CHỨNG CHỈ GỐC CHO HTTPS ---
+// Dán nội dung chứng chỉ của bạn vào đây
+const char* owm_root_ca = \
+"-----BEGIN CERTIFICATE-----\n" \
+"MIIDQTCCAimgAwIBAgITBmyfz5m/jAo54vB4ikPmljZbyjANBgkqhkiG9w0BAQsF\n" \
+"ADA5MQswCQYDVQQGEwJVUzEPMA0GA1UEChMGQW1hem9uMRkwFwYDVQQDExBBbWF6\n" \
+"b24gUm9vdCBDQSAxMB4XDTE1MDUyNjAwMDAwMFoXDTM4MDExNzAwMDAwMFowOTEL\n" \
+"MAkGA1UEBhMCVVMxDzANBgNVBAoTBkFtYXpvbjEZMBcGA1UEAxMQQW1hem9uIFJv\n" \
+"b3QgQ0EgMTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALJ4gHHKeNXj\n" \
+"ca9HgFB0fW7Y14h29Jlo91ghYPl0hAEvrAIthtOgQ3pOsqTQNroBvo3bSMgHFzZM\n" \
+"9O6II8c+6zf1tRn4SWiw3te5djgdlsz6/oVW3g2onQ6oJ/2GJpSBcinTC6doUNJy\n" \
+"uCfRUvYOssmVCe8B8PjdHwRqO+seFCo5ekGBDisFlxSjYuGzwpkoQDbxEb+qfrNp\n" \
+"WCsHwEtNIZbrS8VXyklquEyUZ6IOaD/s+xurxH9W2gAodHtZMfR9AWA81wVJinoa\n" \
+"CiiAvMwweHJb3LJqXb1TdtwW/iAb4cKVRhS83fAseKEEeDRzbFmWdGjO8Ier1JoS\n" \
+"oK2ihcFtcWYCAwEAAaNCMEAwDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMC\n" \
+"AYYwHQYDVR0OBBYEFIQYzIU07LwMlJQuCFmcx7IQTgoIMA0GCSqGSIb3DQEBCwUA\n" \
+"A4IBAQCY8jdaQZChGsV2USggNiMOruYou6r4lK5IpDB/G/wkjUu0yKG73h9hnrMo\n" \
+"eowjdPf8Nxl2SJgFbPlz9RGTXqGocTcfhPNfAMIAIIkgviHke7zGxmpodSztwW0e\n" \
+"GYC44C5eZb2e0/KUNoI/eIzj0vAijr1ZGG82Y0h4gYS5bYX5QK+yiituh2jeP441\n" \
+"KWAlyvcrC6P1AmOCLzSFWbajA6YfL9AE+gAZaVsA/kZgpsoMSyIp2eElTHEe04bU\n" \
+"q8I/qBgzCpbIWd102cGTnwcs7qskJO5wagwU530O23BOnPG9ROKxMas7pahGRD6d\n" \
+"yvKULAjdDh8kPIerFvfiUajPAgMBAAE=\n" \
+"-----END CERTIFICATE-----\n";
+
+// --- CẤU HÌNH NTP (LẤY GIỜ QUA INTERNET) ---
+#define NTP_SERVER "pool.ntp.org"
+#define GMT_OFFSET_SEC (7 * 3600) // Việt Nam là GMT+7
+#define DAYLIGHT_OFFSET_SEC 0       // Không có giờ mùa hè
+
+// --- BIẾN TĨNH (STATIC) CHO MODULE ---
+static TFT_eSPI* _tft;
+static TFT_eSprite* _sprite;
+static MakeFont* _font;
+static AppSettings* _settings;
+
+static WeatherData weatherStationData;
+static bool weatherStationDataValid = false;
+static uint32_t lastWeatherFetchTime = 0;
+static String weatherStationStatus = "Đang khởi tạo...";
+static struct tm timeinfo; // Biến lưu trữ thông tin thời gian
+static bool timeSyncedNTP = false;
+
+// --- KHAI BÁO HÀM NỘI BỘ ---
+static void connectToWiFi();
+static void fetchWeatherData();
+static int mapWeatherIcon(String iconCode);
+static void initNTP();
+static void drawWeatherStationScreen();
+
+// --- TRIỂN KHAI CÁC HÀM ---
+
+void weather_station_init(TFT_eSPI* tft, TFT_eSprite* sprite, MakeFont* font, AppSettings* settings) {
+    _tft = tft;
+    _sprite = sprite;
+    _font = font;
+    _settings = settings;
+}
+
+void weather_station_enter() {
+    weatherStationDataValid = false;
+    weatherStationStatus = "Đang khởi tạo...";
+    lastWeatherFetchTime = 0; // Để fetch ngay lần đầu
+    timeSyncedNTP = false;
+    
+    // Chỉ bật WiFi, việc kết nối và đồng bộ sẽ được xử lý trong loop
+    WiFi.mode(WIFI_STA); 
+}
+
+void weather_station_exit() {
+    if (WiFi.status() == WL_CONNECTED) {
+        // Ngắt kết nối và xóa thông tin AP đã lưu để đảm bảo lần kết nối sau "sạch"
+        WiFi.disconnect(true, true); 
+        delay(100); // Cho ESP32 một chút thời gian để dọn dẹp
+        Serial.println("Weather Station: WiFi disconnected.");
+    }
+    weatherStationDataValid = false;
+}
+
+Mode weather_station_loop(ButtonAction action) {
+    if (action == ACTION_LONG) {
+        return MENU; // Trả về chế độ MENU để file .ino chính xử lý
+    }
+
+    // **REWORKED LOGIC V2**
+    // 1. Nếu không có WiFi, cố gắng kết nối. Nếu thất bại, vẽ màn hình lỗi và thoát.
+    if (WiFi.status() != WL_CONNECTED) {
+        connectToWiFi();
+        if (WiFi.status() != WL_CONNECTED) {
+            drawWeatherStationScreen(); // Vẽ trạng thái lỗi từ connectToWiFi
+            return WEATHER_STATION_MODE;
+        }
+    }
+
+    // 2. Nếu có WiFi nhưng chưa có giờ, thử đồng bộ NTP.
+    if (!timeSyncedNTP) {
+        initNTP();
+        // Nếu vẫn không có giờ sau khi thử, vẽ màn hình lỗi và thoát.
+        if (!timeSyncedNTP) {
+            drawWeatherStationScreen();
+            return WEATHER_STATION_MODE;
+        }
+    }
+
+    // 3. Nếu có WiFi và giờ, kiểm tra xem có cần cập nhật thời tiết không.
+    bool shouldFetch = (millis() - lastWeatherFetchTime > (15 * 60 * 1000)) || !weatherStationDataValid;
+    if (shouldFetch) {
+        fetchWeatherData(); // Hàm này bây giờ giả định WiFi đã kết nối.
+    }
+
+    drawWeatherStationScreen();
+    return WEATHER_STATION_MODE; // Vẫn ở chế độ hiện tại
+}
+
+static void initNTP() {
+    if (WiFi.status() != WL_CONNECTED) {
+        weatherStationStatus = "Lỗi WiFi, không thể lấy giờ";
+        return;
+    }
+    weatherStationStatus = "Đang đồng bộ giờ...";
+    drawWeatherStationScreen();
+
+    configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER);
+
+    unsigned long ntp_start_time = millis();
+    while (!getLocalTime(&timeinfo, 1000)) { // Thử lấy giờ, timeout 1s mỗi lần
+        Serial.println("Failed to obtain time");
+        if (millis() - ntp_start_time > 10000) { // Tổng timeout 10 giây
+            weatherStationStatus = "Lỗi đồng bộ giờ";
+            timeSyncedNTP = false;
+            return;
+        }
+    }
+    timeSyncedNTP = true;
+    Serial.println("Time successfully synced");
+}
+
+static void connectToWiFi() {
+    if (WiFi.status() == WL_CONNECTED) {
+        weatherStationStatus = "WiFi đã kết nối";
+        return;
+    }
+    weatherStationStatus = "Đang kết nối WiFi...";
+    drawWeatherStationScreen(); // Cập nhật trạng thái lên màn hình
+
+    if (_settings->stationSsid.length() == 0) {
+        weatherStationStatus = "Chưa cài đặt WiFi";
+        drawWeatherStationScreen();
+        return;
+    }
+
+    WiFi.begin(_settings->stationSsid.c_str(), _settings->stationPassword.c_str());
+    unsigned long startTime = millis();
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(".");
+        if (millis() - startTime > 15000) { // Timeout 15 giây
+            Serial.println("\nWiFi connection failed!");
+            weatherStationStatus = "Lỗi kết nối WiFi";
+            return;
+        }
+    }
+    Serial.println("\nWiFi connected!");
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP());
+
+    // --- KIỂM TRA CƯỜNG ĐỘ TÍN HIỆU WIFI ---
+    long rssi = WiFi.RSSI();
+    Serial.print("WiFi RSSI: ");
+    Serial.println(rssi);
+    
+    weatherStationStatus = "Đã kết nối";
+}
+
+static void fetchWeatherData() {
+    // Giả định rằng WiFi đã được kết nối bởi hàm loop chính
+    Serial.println("[Weather] Starting fetchWeatherData...");
+    
+    weatherStationStatus = "Đang cập nhật...";
+    Serial.println("[Weather] Status: Đang cập nhật...");
+    drawWeatherStationScreen();
+
+    if (_settings->owmApiKey.length() == 0) {
+        weatherStationStatus = "Chưa có API Key";
+        drawWeatherStationScreen();
+        return;
+    }
+
+    // Khai báo client và http cục bộ để đảm bảo chúng được dọn dẹp
+    // WiFiClientSecure client;
+    // Thiết lập chứng chỉ để xác thực server
+    // if (strlen(owm_root_ca) > 0) {
+    //     client.setCACert(owm_root_ca);
+    // } else {
+    //     // Nếu không có chứng chỉ, bỏ qua xác thực (không an toàn, chỉ dùng để test)
+    //     client.setInsecure();
+    //     Serial.println("[Weather] WARNING: Insecure HTTPS connection, skipping certificate validation.");
+    // }
+    
+    HTTPClient http;
+
+    String url = "https://api.openweathermap.org/data/2.5/weather?id=" + _settings->owmCityId 
+                 + "&appid=" + _settings->owmApiKey + "&units=metric&lang=vi";
+    Serial.println("[Weather] Request URL: " + url);
+
+    // Bắt đầu HTTP request với client đã kết nối
+    http.begin(client, url); // Sử dụng client an toàn
+    // **FIX: Thêm các header để yêu cầu trông "chuẩn" hơn**
+    http.addHeader("User-Agent", "ESP32"); 
+    http.setReuse(false); // Không tái sử dụng kết nối
+    http.setTimeout(12000); // Tăng timeout lên 12 giây
+
+    Serial.println("[Weather] Sending HTTP GET request...");
+    int httpCode = http.GET();
+    Serial.println("[Weather] HTTP Code: " + String(httpCode));
+
+    if (httpCode > 0) {
+        if (httpCode == HTTP_CODE_OK) {
+            Serial.println("[Weather] HTTP OK. Reading payload...");
+            String payload = http.getString();
+            StaticJsonDocument<1024> doc;
+            DeserializationError error = deserializeJson(doc, payload);
+            if (error) {
+                Serial.print(F("deserializeJson() failed: "));
+                Serial.println(error.f_str());
+                weatherStationStatus = "Lỗi phân tích dữ liệu";
+                http.end(); // Quan trọng: Luôn gọi end()
+                return;
+            }
+
+            weatherStationData.city = doc["name"].as<String>();
+            weatherStationData.currentTemp = round(doc["main"]["temp"].as<float>()); // Ép kiểu float
+            weatherStationData.highTemp = round(doc["main"]["temp_max"].as<float>()); // Ép kiểu float
+            weatherStationData.lowTemp = round(doc["main"]["temp_min"].as<float>()); // Ép kiểu float
+            weatherStationData.pressure = doc["main"]["humidity"].as<int>(); // Ép kiểu int
+            weatherStationData.uv = doc["wind"]["speed"].as<float>() * 3.6; // Ép kiểu float
+            weatherStationData.updateTime = doc["weather"][0]["description"].as<String>(); // Ép kiểu String
+            weatherStationData.updateTime.toUpperCase();
+
+            Serial.println("[Weather] JSON parsed successfully.");
+            String iconCode = doc["weather"][0]["icon"];
+            weatherStationData.icon = mapWeatherIcon(iconCode);
+
+            weatherStationDataValid = true;
+            lastWeatherFetchTime = millis();
+            if (timeSyncedNTP) {
+                char timeStr[6];
+                sprintf(timeStr, "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
+                weatherStationStatus = "Cập nhật lúc " + String(timeStr);
+            }
+            Serial.println("[Weather] Data updated.");
+        } else {
+            weatherStationStatus = "Lỗi HTTP: " + String(httpCode);
+            Serial.println("[Weather] " + weatherStationStatus);
+        }
+    } else {
+        weatherStationStatus = "Lỗi kết nối server";
+        Serial.println("[Weather] " + weatherStationStatus + ": " + http.errorToString(httpCode).c_str());
+    }
+    http.end(); // Quan trọng: Luôn gọi end() để giải phóng tài nguyên
+}
+
+static int mapWeatherIcon(String iconCode) {
+    if (iconCode == "01d" || iconCode == "01n") return 0; // Clear
+    if (iconCode == "02d" || iconCode == "02n") return 1; // Few clouds
+    if (iconCode == "03d" || iconCode == "03n") return 2; // Scattered clouds
+    if (iconCode == "04d" || iconCode == "04n") return 2; // Broken clouds
+    if (iconCode == "09d" || iconCode == "09n") return 3; // Shower rain
+    if (iconCode == "10d" || iconCode == "10n") return 4; // Rain
+    if (iconCode == "11d" || iconCode == "11n") return 5; // Thunderstorm
+    if (iconCode == "13d" || iconCode == "13n") return 6; // Snow
+    if (iconCode == "50d" || iconCode == "50n") return 2; // Mist
+    return 7; // Unknown
+}
+
+static void drawWeatherStationScreen() {
+  if (!weatherStationDataValid || !timeSyncedNTP) {
+    _sprite->fillSprite(TFT_BLACK);
+    fontTargetSprite = _sprite;
+    _font->set_font(Fira_Code_16);
+    _font->print((_tft->width() - _font->getLength(weatherStationStatus)) / 2, 110, weatherStationStatus, TFT_YELLOW, TFT_BLACK);
+    _sprite->pushSprite(0, 0);
+    return;
+  }
+
+  _sprite->setTextSize(1);
+  _sprite->setTextDatum(TL_DATUM);
+  _sprite->setFreeFont(nullptr);
+  fontTargetSprite = _sprite;
+
+  _sprite->fillSprite(TFT_BLACK);
+
+  int regionW = _tft->width() / 3;
+  int offsetX = _tft->width() * 2 / 3;
+
+  String city = weatherStationData.city;
+  int lastSpace = city.lastIndexOf(' ');
+  if (lastSpace > 0) {
+    city = city.substring(0, lastSpace);
+  }
+
+  _sprite->setTextFont(4);
+  _sprite->setTextColor(0xFFFF);
+  _sprite->drawString(city, (160 - _sprite->textWidth(city)) / 2, 20);
+  _sprite->setTextFont(1);
+
+  drawWeatherIcon(weatherStationData.icon, offsetX + (regionW - WEATHER_W) / 2, 0);
+
+  _sprite->setFreeFont(&Digitall0132pt7b);
+
+  char hourStr[3], minuteStr[3];
+  sprintf(hourStr, "%02d", timeinfo.tm_hour);
+  sprintf(minuteStr, "%02d", timeinfo.tm_min);
+
+  int hourW = _sprite->textWidth(hourStr);
+  int minuteW = _sprite->textWidth(minuteStr);
+  int totalW = hourW + minuteW;
+  int timeX = 0 + (offsetX - totalW) / 2;
+
+  _sprite->setTextColor(0xFEE0);
+  _sprite->drawString(hourStr, timeX, 55);
+  _sprite->setTextColor(0xF206);
+  _sprite->drawString(minuteStr, timeX + hourW + 5, 55);
+
+  _sprite->setFreeFont(&Digitall0124pt7b);
+  char secondStr[3];
+  sprintf(secondStr, "%02d", timeinfo.tm_sec);
+  _sprite->setTextColor(0x24BE);
+  _sprite->drawString(secondStr, offsetX + (regionW - _sprite->textWidth(secondStr)) / 2, 95);
+  _sprite->setFreeFont(nullptr);
+
+  _sprite->setTextFont(4);
+  char dateStr[11];
+  sprintf(dateStr, "%02d/%02d/%d", timeinfo.tm_mday, timeinfo.tm_mon + 1, timeinfo.tm_year + 1900);
+  _sprite->setTextColor(0xFFFF);
+  _sprite->drawString(dateStr, (160 - _sprite->textWidth(dateStr)) / 2, 120);
+  _sprite->setTextFont(1);
+
+  _sprite->setFreeFont(&Digitall0132pt7b);
+  String tempStr = String(weatherStationData.currentTemp);
+  int tempW = _sprite->textWidth(tempStr);
+  int cW = _sprite->textWidth("C");
+  int totalTempW = tempW + cW;
+  int tempX = 0 + (offsetX - totalTempW) / 2;
+
+  uint16_t tempColor = (weatherStationData.currentTemp > 29) ? TFT_ORANGE : TFT_GREEN;
+  _sprite->setTextColor(tempColor, TFT_BLACK);
+  _sprite->drawString(tempStr, tempX - 5, 145);
+  _sprite->drawString("C", tempX + tempW + 5, 145);
+  _sprite->drawCircle(tempX + tempW, 155, 4, tempColor);
+  _sprite->setTextDatum(TL_DATUM);
+  _sprite->setFreeFont(NULL);
+
+  String highLowStr = "H:" + String(weatherStationData.highTemp) + "° L:" + String(weatherStationData.lowTemp) + "°";
+  String infoStr = "UV:" + String(weatherStationData.uv, 0); // Hiển thị tốc độ gió (km/h)
+  String other = highLowStr + " " + infoStr;
+
+  if (_font->getLength(other) <= 150) {
+    _font->print(6, 220, other, TFT_WHITE, TFT_BLACK);
+  } else {
+    drawMarqueeText(_sprite, _font, other, 6, 220, 150, TFT_WHITE, TFT_BLACK, true, 35);
+  }
+
+  _sprite->pushSprite(0, 0);
+}

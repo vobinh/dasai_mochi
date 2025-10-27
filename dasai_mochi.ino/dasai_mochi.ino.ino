@@ -364,13 +364,41 @@ void drawMusicPlayerScreen() {
 }
 
 // *** HÀM MỚI ĐỂ VẼ ICON THỜI TIẾT ***
+// void drawWeatherIcon(int iconIndex, int x, int y) {
+//   if (iconIndex < 0 || iconIndex > 7) {
+//     iconIndex = 7;  // Mặc định là icon "Unknown" nếu chỉ số không hợp lệ
+//   }
+//   // Đọc con trỏ từ PROGMEM, sau đó đọc dữ liệu ảnh từ con trỏ đó
+//   const uint16_t *icon_ptr = (const uint16_t *)pgm_read_ptr(&weather_icons[iconIndex]);
+//   Serial.printf("First pixel = 0x%04X\n", icon_ptr[0]);
+//   screenSprite.pushImage(x, y, WEATHER_W, WEATHER_H, (uint16_t*)icon_ptr, TFT_BLACK);
+// }
+
 void drawWeatherIcon(int iconIndex, int x, int y) {
-  if (iconIndex < 0 || iconIndex > 7) {
-    iconIndex = 7;  // Mặc định là icon "Unknown" nếu chỉ số không hợp lệ
-  }
-  // Đọc con trỏ từ PROGMEM, sau đó đọc dữ liệu ảnh từ con trỏ đó
-  const uint16_t *icon_ptr = (const uint16_t *)pgm_read_ptr(&weather_icons[iconIndex]);
-  screenSprite.pushImage(x, y, WEATHER_W, WEATHER_H, icon_ptr);
+    if (iconIndex < 0 || iconIndex >= (sizeof(weather_icons) / sizeof(weather_icons[0]))) {
+        iconIndex = 7; // Mặc định là icon "Unknown" nếu chỉ số không hợp lệ
+    }
+    // Đọc con trỏ từ PROGMEM
+    const uint16_t *icon_ptr = (const uint16_t *)pgm_read_ptr(&weather_icons[iconIndex]);
+
+    // Tạo một bộ đệm trên stack để chứa một dòng của icon
+    uint16_t line_buffer[WEATHER_W];
+
+    // Lặp qua từng dòng (y) và từng pixel (x) của icon
+    for (int j = 0; j < WEATHER_H; j++) {
+        // Sao chép một dòng từ PROGMEM vào bộ đệm RAM để tăng tốc độ truy cập
+        memcpy_P(line_buffer, &icon_ptr[j * WEATHER_W], WEATHER_W * 2);
+
+        for (int i = 0; i < WEATHER_W; i++) {
+            uint16_t color = line_buffer[i];
+            // Chỉ vẽ pixel nếu nó không phải là màu đen (màu trong suốt)
+            if (color != TFT_BLACK) {
+                // *** SỬA LỖI MÀU: Hoán đổi byte cao và byte thấp của màu ***
+                uint16_t swapped_color = (color << 8) | (color >> 8);
+                screenSprite.drawPixel(x + i, y + j, swapped_color);
+            }
+        }
+    }
 }
 
 String getWeatherLabel(int iconIndex) {
@@ -810,6 +838,10 @@ void setup() {
   } else if (settings.weatherEnabled) {
     Serial.println("*** Weather Boot Mode Activated! ***");
     button_init();
+
+    TJpgDec.setJpgScale(1);
+    TJpgDec.setSwapBytes(true);
+    TJpgDec.setCallback(tft_output);
 
     weather_station_init(&tft, &screenSprite, &myfont, &settings);
     weather_station_enter();
